@@ -1,0 +1,22 @@
+# 数据目录：数据库、浏览器登录态、原始爬取缓存
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# 环境
+.env
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}求职者视图 - Boss直聘 AI岗位市场雷达{% endblock %}
+{% block content %}
+<div class="grid">
+    <div class="card">
+        <h3>薪资分布</h3>
+        <div id="chart-salary-dist" class="chart"></div>
+    </div>
+    <div class="card">
+        <h3>高频技能要求 TOP20</h3>
+        <div id="chart-skill-rank" class="chart"></div>
+    </div>
+    <div class="card">
+        <h3>企业薪资横向对比 TOP15</h3>
+        <div id="chart-company-rank" class="chart"></div>
+    </div>
+    <div class="card">
+        <h3>招聘量与平均薪资趋势</h3>
+        <div id="chart-hiring-trend" class="chart"></div>
+    </div>
+</div>
+
+<script>
+function renderChart(elId, url, buildOption) {
+    const chart = echarts.init(document.getElementById(elId));
+    chart.showLoading();
+    fetch(url).then(r => r.json()).then(data => {
+        chart.hideLoading();
+        chart.setOption(buildOption(data));
+    });
+    window.addEventListener('resize', () => chart.resize());
+    return chart;
+}
+
+renderChart('chart-salary-dist', '/api/salary_distribution', data => ({
+    tooltip: {},
+    xAxis: { type: 'category', data: data.labels, axisLabel: { rotate: 45, fontSize: 11 } },
+    yAxis: { type: 'value', name: '岗位数' },
+    series: [{ type: 'bar', data: data.counts, itemStyle: { color: '#5470c6' } }]
+}));
+
+renderChart('chart-skill-rank', '/api/skill_ranking', data => ({
+    tooltip: {},
+    grid: { left: 110, right: 30 },
+    xAxis: { type: 'value', name: '出现次数' },
+    yAxis: { type: 'category', data: data.labels.slice().reverse(), axisLabel: { fontSize: 11 } },
+    series: [{ type: 'bar', data: data.counts.slice().reverse(), itemStyle: { color: '#91cc75' } }]
+}));
+
+renderChart('chart-company-rank', '/api/company_salary_ranking', data => ({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['平均薪资(K)', '在招岗位数'], top: 0 },
+    grid: { top: 40 },
+    xAxis: { type: 'category', data: data.labels, axisLabel: { rotate: 45, fontSize: 11 } },
+    yAxis: [
+        { type: 'value', name: '平均薪资(K)' },
+        { type: 'value', name: '岗位数' }
+    ],
+    series: [
+        { name: '平均薪资(K)', type: 'bar', data: data.avg_salary, itemStyle: { color: '#fac858' } },
+        { name: '在招岗位数', type: 'line', yAxisIndex: 1, data: data.job_count, itemStyle: { color: '#ee6666' } }
+    ]
+}));
+
+renderChart('chart-hiring-trend', '/api/hiring_trend', data => ({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['新增岗位数', '平均薪资(K)'], top: 0 },
+    grid: { top: 40 },
+    xAxis: { type: 'category', data: data.labels },
+    yAxis: [
+        { type: 'value', name: '岗位数' },
+        { type: 'value', name: '平均薪资(K)' }
+    ],
+    series: [
+        { name: '新增岗位数', type: 'bar', data: data.job_count, itemStyle: { color: '#5470c6' } },
+        { name: '平均薪资(K)', type: 'line', yAxisIndex: 1, data: data.avg_salary, itemStyle: { color: '#ee6666' } }
+    ]
+}));
+</script>
+{% endblock %}

@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}招聘信息汇总 - Boss直聘 AI岗位市场雷达{% endblock %}
+{% block content %}
+<div class="card">
+    <h3>全部公司招聘信息汇总</h3>
+    <div class="filter-bar">
+        <input type="text" id="filter-keyword" placeholder="岗位名称 / 搜索方向，如：Agent、大模型">
+        <input type="text" id="filter-company" placeholder="公司名称">
+        <select id="filter-exp">
+            <option value="">经验不限</option>
+            <option value="campus">应届/经验不限</option>
+            <option value="experienced">有经验要求</option>
+        </select>
+        <button id="filter-btn">筛选</button>
+        <button id="reset-btn" style="background:#f0f0f0;color:#666;">重置</button>
+        <span id="result-count"></span>
+    </div>
+    <table class="job-table">
+        <thead>
+            <tr>
+                <th class="sortable" data-asc="title_asc" data-desc="title_desc">岗位 <span id="sort-title-icon"></span></th>
+                <th>公司</th>
+                <th>地区</th>
+                <th class="sortable" data-asc="salary_asc" data-desc="salary_desc">薪资 <span id="sort-salary-icon">↓</span></th>
+                <th>经验</th>
+                <th>学历</th>
+                <th>技能标签</th>
+                <th>更新日期</th>
+            </tr>
+        </thead>
+        <tbody id="job-table-body"></tbody>
+    </table>
+    <div class="pagination">
+        <button id="prev-page">上一页</button>
+        <span id="page-indicator"></span>
+        <button id="next-page">下一页</button>
+    </div>
+</div>
+
+<div class="card">
+    <h3>已过滤岗位（未入库，供核对过滤规则是否符合预期）</h3>
+    <table class="job-table">
+        <thead>
+            <tr>
+                <th>岗位</th>
+                <th>公司</th>
+                <th>过滤原因</th>
+                <th>命中关键词</th>
+                <th>过滤时间</th>
+            </tr>
+        </thead>
+        <tbody id="filtered-table-body"></tbody>
+    </table>
+    <div class="pagination">
+        <button id="filtered-prev-page">上一页</button>
+        <span id="filtered-page-indicator"></span>
+        <button id="filtered-next-page">下一页</button>
+        <span id="filtered-result-count" style="margin-left:auto; color:#999; font-size:13px;"></span>
+    </div>
+</div>
+
+<script>
+let currentPage = 1;
+let currentSort = 'salary_desc';
+
+function updateSortIcons() {
+    document.getElementById('sort-title-icon').textContent = '';
+    document.getElementById('sort-salary-icon').textContent = '';
+    if (currentSort === 'title_asc') document.getElementById('sort-title-icon').textContent = '↑';
+    else if (currentSort === 'title_desc') document.getElementById('sort-title-icon').textContent = '↓';
+    else if (currentSort === 'salary_asc') document.getElementById('sort-salary-icon').textContent = '↑';
+    else if (currentSort === 'salary_desc') document.getElementById('sort-salary-icon').textContent = '↓';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : text;
+    return div.innerHTML;
+}
+
+function loadJobs() {
+    const keyword = document.getElementById('filter-keyword').value.trim();
+    const company = document.getElementById('filter-company').value.trim();
+    const exp = document.getElementById('filter-exp').value;
+    const params = new URLSearchParams({ page: currentPage, sort: currentSort });
+    if (keyword) params.set('keyword', keyword);
+    if (company) params.set('company', company);
+    if (exp) params.set('exp', exp);
+
+    fetch('/api/job_list?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('job-table-body');
+            if (data.items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-row">没有匹配的岗位</td></tr>';
+            } else {
+                tbody.innerHTML = data.items.map(job => `
+                    <tr>
+                        <td><a href="${escapeHtml(job.url)}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a></td>
+                        <td>${escapeHtml(job.company_name)}</td>
+                        <td>${escapeHtml(job.city)}${job.area ? ' · ' + escapeHtml(job.area) : ''}</td>
+                        <td>${escapeHtml(job.salary)}</td>
+                        <td>${escapeHtml(job.experience)}</td>
+                        <td>${escapeHtml(job.education) || '-'}</td>
+                        <td>${job.skill_tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</td>
+                        <td>${escapeHtml(job.last_seen_at) || '-'}</td>
+                    </tr>
+                `).join('');
+            }
+
+            const totalPages = Math.max(1, Math.ceil(data.total / data.per_page));
+            document.getElementById('page-indicator').textContent = `第 ${data.page} / ${totalPages} 页`;
+            document.getElementById('result-count').textContent = `共 ${data.total} 条`;
+            document.getElementById('prev-page').disabled = data.page <= 1;
+            document.getElementById('next-page').disabled = data.page >= totalPages;
+        });
+}
+
+document.getElementById('filter-btn').addEventListener('click', () => { currentPage = 1; loadJobs(); });
+document.getElementById('reset-btn').addEventListener('click', () => {
+    document.getElementById('filter-keyword').value = '';
+    document.getElementById('filter-company').value = '';
+    document.getElementById('filter-exp').value = '';
+    currentPage = 1; loadJobs();
+});
+
+document.querySelectorAll('.sortable').forEach(th => {
+    th.style.cursor = 'pointer';
+    th.addEventListener('click', () => {
+        const asc = th.dataset.asc, desc = th.dataset.desc;
+        currentSort = (currentSort === desc) ? asc : desc;
+        updateSortIcons();
+        currentPage = 1;
+        loadJobs();
+    });
+});
+document.getElementById('prev-page').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadJobs(); } });
+document.getElementById('next-page').addEventListener('click', () => { currentPage++; loadJobs(); });
+['filter-keyword', 'filter-company'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+        if (e.key === 'Enter') { currentPage = 1; loadJobs(); }
+    });
+});
+
+loadJobs();
+
+let filteredPage = 1;
+
+function loadFilteredJobs() {
+    fetch('/api/filtered_job_list?page=' + filteredPage)
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('filtered-table-body');
+            if (data.items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-row">暂无被过滤的岗位</td></tr>';
+            } else {
+                tbody.innerHTML = data.items.map(job => `
+                    <tr>
+                        <td><a href="${escapeHtml(job.url)}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a></td>
+                        <td>${escapeHtml(job.company_name)}</td>
+                        <td><span class="tag">${escapeHtml(job.reason)}</span></td>
+                        <td>${escapeHtml(job.source_keyword)}</td>
+                        <td>${escapeHtml(job.filtered_at) || '-'}</td>
+                    </tr>
+                `).join('');
+            }
+
+            const totalPages = Math.max(1, Math.ceil(data.total / data.per_page));
+            document.getElementById('filtered-page-indicator').textContent = `第 ${data.page} / ${totalPages} 页`;
+            document.getElementById('filtered-result-count').textContent = `共 ${data.total} 条`;
+            document.getElementById('filtered-prev-page').disabled = data.page <= 1;
+            document.getElementById('filtered-next-page').disabled = data.page >= totalPages;
+        });
+}
+
+document.getElementById('filtered-prev-page').addEventListener('click', () => { if (filteredPage > 1) { filteredPage--; loadFilteredJobs(); } });
+document.getElementById('filtered-next-page').addEventListener('click', () => { filteredPage++; loadFilteredJobs(); });
+
+loadFilteredJobs();
+</script>
+{% endblock %}
