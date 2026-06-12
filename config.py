@@ -9,10 +9,10 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 EDGE_PROFILE_DIR = os.path.join(DATA_DIR, "edge_profile")
 RAW_DUMP_DIR = os.path.join(DATA_DIR, "raw")
 
-# Claude API
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-AI_MODEL = "claude-haiku-4-5-20251001"
+# AI API（兼容 OpenAI 格式：DeepSeek / OpenAI / 其他兼容接口）
+AI_API_KEY = os.environ.get("AI_API_KEY", "")
+AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://api.deepseek.com")
+AI_MODEL = os.environ.get("AI_MODEL", "deepseek-chat")
 
 PORT = int(os.environ.get("PORT", 5000))
 

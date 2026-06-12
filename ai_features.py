@@ -1,9 +1,10 @@
 # !/usr/bin/env python
 # _*_ coding: utf-8 _*_
-"""AI 功能模块：匹配评分、Gap 分析、公司情报、AI 对话（均基于 Claude API）"""
+"""AI 功能模块：匹配评分、Gap 分析、公司情报、AI 对话
+使用 OpenAI 兼容接口，支持 DeepSeek / OpenAI / 任意兼容提供商"""
 
 import json
-import anthropic
+from openai import OpenAI
 import config
 
 _client = None
@@ -12,17 +13,35 @@ _client = None
 def _get_client():
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(
-            api_key=config.ANTHROPIC_API_KEY,
-            base_url=config.ANTHROPIC_BASE_URL,
+        _client = OpenAI(
+            api_key=config.AI_API_KEY,
+            base_url=config.AI_BASE_URL,
         )
     return _client
+
+
+def _stream_text(messages, system=None, max_tokens=800):
+    """OpenAI 兼容流式调用，yield 文本片段"""
+    msgs = []
+    if system:
+        msgs.append({"role": "system", "content": system})
+    msgs.extend(messages)
+    stream = _get_client().chat.completions.create(
+        model=config.AI_MODEL,
+        messages=msgs,
+        max_tokens=max_tokens,
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
 
 
 def match_score(resume_text: str, jd_text: str) -> dict:
     """计算简历与JD的匹配评分（0-100），返回分数和简短理由"""
     if not resume_text or not jd_text:
-        return {"score": 0, "reason": "简历或JD为空"}
+        return {"score": 0, "reason": "简历或JD为空", "matched": []}
 
     prompt = f"""你是一位资深HR，请评估以下简历与岗位的匹配程度。
 
@@ -40,13 +59,13 @@ def match_score(resume_text: str, jd_text: str) -> dict:
 }}"""
 
     try:
-        resp = _get_client().messages.create(
+        resp = _get_client().chat.completions.create(
             model=config.AI_MODEL,
-            max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
+            stream=False,
         )
-        text = resp.content[0].text.strip()
-        # 提取JSON
+        text = resp.choices[0].message.content.strip()
         start = text.find("{")
         end = text.rfind("}") + 1
         return json.loads(text[start:end])
@@ -85,13 +104,8 @@ def gap_analysis_stream(resume_text: str, jd_text: str):
 保持语言精炼，每条不超过30字。"""
 
     try:
-        with _get_client().messages.stream(
-            model=config.AI_MODEL,
-            max_tokens=800,
-            messages=[{"role": "user", "content": prompt}],
-        ) as stream:
-            for text in stream.text_stream:
-                yield {"type": "text", "text": text}
+        for text in _stream_text([{"role": "user", "content": prompt}], max_tokens=800):
+            yield {"type": "text", "text": text}
         yield {"type": "done"}
     except Exception as e:
         yield {"type": "error", "error": str(e)}
@@ -126,13 +140,8 @@ JD内容：
 根据JD和业务方向，预测面试可能重点考察的2-3个方向"""
 
     try:
-        with _get_client().messages.stream(
-            model=config.AI_MODEL,
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}],
-        ) as stream:
-            for text in stream.text_stream:
-                yield {"type": "text", "text": text}
+        for text in _stream_text([{"role": "user", "content": prompt}], max_tokens=600):
+            yield {"type": "text", "text": text}
         yield {"type": "done"}
     except Exception as e:
         yield {"type": "error", "error": str(e)}
@@ -153,20 +162,12 @@ def chat_stream(question: str, history: list, context_jobs: list = None):
     for h in history[-6:]:
         messages.append({"role": h["role"], "content": h["content"]})
 
-    user_content = question
-    if context_text:
-        user_content = f"{question}\n{context_text}"
+    user_content = question + context_text if context_text else question
     messages.append({"role": "user", "content": user_content})
 
     try:
-        with _get_client().messages.stream(
-            model=config.AI_MODEL,
-            max_tokens=800,
-            system=system,
-            messages=messages,
-        ) as stream:
-            for text in stream.text_stream:
-                yield {"type": "text", "text": text}
+        for text in _stream_text(messages, system=system, max_tokens=800):
+            yield {"type": "text", "text": text}
         yield {"type": "done"}
     except Exception as e:
         yield {"type": "error", "error": str(e)}
