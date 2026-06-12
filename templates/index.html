@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>JobLens — AI 求职分析平台</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f5; display: flex; height: 100vh; overflow: hidden; }
+
+/* ── 侧边栏 ── */
+.sidebar { width: 220px; background: #0f1c2e; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; }
+.logo { padding: 22px 20px; font-size: 20px; font-weight: 800; color: #4facfe; border-bottom: 1px solid rgba(255,255,255,.08); letter-spacing: 1px; }
+.logo span { font-size: 11px; display: block; color: #8899aa; font-weight: 400; margin-top: 2px; }
+.nav-item { padding: 13px 20px; cursor: pointer; display: flex; align-items: center; gap: 10px; font-size: 14px; color: #8899aa; transition: all .2s; border-left: 3px solid transparent; }
+.nav-item:hover { background: rgba(255,255,255,.05); color: #fff; }
+.nav-item.active { background: rgba(79,172,254,.12); color: #4facfe; border-left-color: #4facfe; }
+.nav-icon { font-size: 16px; width: 20px; text-align: center; }
+.nav-badge { margin-left: auto; background: #4facfe; color: #fff; font-size: 11px; padding: 2px 7px; border-radius: 10px; }
+.sidebar-footer { margin-top: auto; padding: 16px 20px; border-top: 1px solid rgba(255,255,255,.08); font-size: 12px; color: #556; }
+.data-tag { display: inline-block; background: #1e3a2a; color: #4ade80; font-size: 11px; padding: 3px 8px; border-radius: 4px; margin-top: 6px; }
+
+/* ── 主内容 ── */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.topbar { background: #fff; padding: 0 28px; height: 58px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e8ecf0; flex-shrink: 0; }
+.topbar-title { font-size: 16px; font-weight: 600; color: #1a2332; }
+.topbar-sub { font-size: 12px; color: #aab; margin-top: 2px; }
+.topbar-right { display: flex; align-items: center; gap: 14px; }
+.avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg,#4facfe,#00f2fe); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: bold; }
+.search-box { padding: 7px 14px; border: 1.5px solid #e0e6ef; border-radius: 20px; font-size: 13px; width: 220px; outline: none; color: #333; }
+.search-box:focus { border-color: #4facfe; }
+.content { flex: 1; overflow-y: auto; padding: 24px 28px; }
+.page { display: none; }
+.page.active { display: block; }
+
+/* ── 通用卡片 ── */
+.card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.section-title { font-size: 14px; font-weight: 600; color: #1a2332; margin-bottom: 14px; }
+
+/* ── 仪表盘 ── */
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+.stat-card { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.stat-label { font-size: 12px; color: #99a; margin-bottom: 8px; }
+.stat-value { font-size: 28px; font-weight: 700; color: #1a2332; }
+.stat-sub { font-size: 12px; color: #4ade80; margin-top: 4px; }
+.stat-icon { float: right; font-size: 28px; opacity: .15; }
+.charts-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 20px; }
+.chart-box { height: 240px; }
+.job-mini { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f2f5; }
+.job-mini:last-child { border-bottom: none; }
+.company-logo { width: 36px; height: 36px; border-radius: 8px; background: linear-gradient(135deg,#667eea,#764ba2); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; font-weight: bold; flex-shrink: 0; }
+.job-mini-info { flex: 1; }
+.job-mini-title { font-size: 13px; font-weight: 600; color: #1a2332; }
+.job-mini-sub { font-size: 12px; color: #99a; margin-top: 2px; }
+.match-badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 10px; }
+.match-high { background: #ecfdf5; color: #059669; }
+.match-mid { background: #fffbeb; color: #d97706; }
+.match-low { background: #fff1f2; color: #e11d48; }
+
+/* ── 岗位列表 ── */
+.list-layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; }
+.filter-panel { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.06); height: fit-content; position: sticky; top: 0; }
+.filter-group { margin-bottom: 18px; }
+.filter-label { font-size: 12px; color: #99a; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+.filter-tag { display: inline-block; padding: 5px 12px; border: 1.5px solid #e0e6ef; border-radius: 16px; font-size: 12px; color: #556; cursor: pointer; margin: 3px 3px 3px 0; transition: all .15s; }
+.filter-tag.on { border-color: #4facfe; color: #4facfe; background: #f0f8ff; }
+.salary-range { display: flex; align-items: center; gap: 8px; }
+.salary-range input { flex: 1; padding: 6px 10px; border: 1.5px solid #e0e6ef; border-radius: 8px; font-size: 12px; outline: none; min-width: 0; }
+.apply-btn { width: 100%; padding: 9px; background: #4facfe; color: #fff; border: none; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 600; margin-top: 10px; }
+.apply-btn:hover { background: #357abd; }
+.job-list { display: flex; flex-direction: column; gap: 12px; }
+.job-card { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); cursor: pointer; transition: all .2s; border: 2px solid transparent; }
+.job-card:hover { border-color: #4facfe; box-shadow: 0 4px 16px rgba(79,172,254,.15); }
+.job-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+.job-title { font-size: 15px; font-weight: 700; color: #1a2332; }
+.job-salary { font-size: 16px; font-weight: 700; color: #4facfe; }
+.job-company { font-size: 13px; color: #556; margin-bottom: 8px; }
+.job-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.job-tag { padding: 3px 10px; background: #f0f8ff; color: #4facfe; border-radius: 12px; font-size: 11px; }
+.job-tag.gray { background: #f5f7fa; color: #778; }
+.job-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f0f2f5; }
+.job-meta { font-size: 12px; color: #aab; }
+.pagination { display: flex; gap: 8px; justify-content: center; margin-top: 20px; align-items: center; }
+.page-btn { padding: 7px 14px; border: 1.5px solid #e0e6ef; border-radius: 8px; font-size: 13px; cursor: pointer; background: #fff; color: #556; transition: all .15s; }
+.page-btn.active { border-color: #4facfe; color: #4facfe; background: #f0f8ff; }
+.page-btn:hover:not(.active) { border-color: #c0cfe8; }
+.sort-bar { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
+.sort-btn { padding: 5px 14px; border: 1.5px solid #e0e6ef; border-radius: 16px; font-size: 12px; cursor: pointer; background: #fff; color: #556; transition: all .15s; }
+.sort-btn.active { border-color: #4facfe; color: #4facfe; background: #f0f8ff; }
+.result-count { font-size: 12px; color: #aab; margin-left: auto; }
+.empty-state { text-align: center; padding: 60px 20px; color: #aab; }
+.empty-icon { font-size: 48px; margin-bottom: 12px; }
+
+/* ── 岗位详情 ── */
+.detail-layout { display: grid; grid-template-columns: 1fr 360px; gap: 16px; }
+.detail-main { display: flex; flex-direction: column; gap: 14px; }
+.detail-sidebar { display: flex; flex-direction: column; gap: 14px; }
+.detail-header { background: #fff; border-radius: 12px; padding: 22px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.detail-title { font-size: 20px; font-weight: 700; color: #1a2332; margin-bottom: 6px; }
+.detail-salary { font-size: 22px; font-weight: 700; color: #4facfe; margin-bottom: 12px; }
+.detail-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: #556; margin-bottom: 14px; }
+.detail-meta span { display: flex; align-items: center; gap: 4px; }
+.detail-skill-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.detail-skill-tag { padding: 4px 12px; background: #f0f8ff; color: #4facfe; border-radius: 12px; font-size: 12px; font-weight: 500; }
+.detail-actions { display: flex; gap: 10px; }
+.btn-primary { padding: 10px 24px; background: #4facfe; color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600; transition: background .2s; }
+.btn-primary:hover { background: #357abd; }
+.btn-secondary { padding: 10px 20px; border: 1.5px solid #4facfe; color: #4facfe; background: #fff; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600; transition: all .2s; }
+.btn-secondary:hover { background: #f0f8ff; }
+.jd-content { font-size: 14px; color: #334; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+.intel-stream { font-size: 13px; color: #334; line-height: 1.7; }
+.intel-stream h2 { font-size: 14px; color: #1a2332; margin: 12px 0 6px; }
+.intel-stream strong { color: #1a2332; }
+.intel-stream p { margin-bottom: 6px; }
+.intel-stream ul, .intel-stream li { margin-left: 16px; margin-bottom: 4px; }
+.match-score-big { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.score-circle { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800; flex-shrink: 0; }
+.score-high { background: #ecfdf5; color: #059669; }
+.score-mid { background: #fffbeb; color: #d97706; }
+.score-low { background: #fff1f2; color: #e11d48; }
+.score-info { flex: 1; }
+.score-label { font-size: 12px; color: #99a; }
+.score-reason { font-size: 13px; color: #334; margin-top: 4px; }
+.matched-tag { display: inline-block; padding: 3px 10px; background: #ecfdf5; color: #059669; border-radius: 12px; font-size: 11px; margin: 2px; }
+.back-btn { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #4facfe; cursor: pointer; margin-bottom: 16px; }
+.back-btn:hover { opacity: .7; }
+
+/* ── 简历 ── */
+.resume-layout { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+.resume-editor { width: 100%; min-height: 420px; padding: 16px; border: 1.5px solid #e0e6ef; border-radius: 8px; font-size: 14px; color: #334; line-height: 1.7; font-family: -apple-system,'PingFang SC',sans-serif; resize: vertical; outline: none; }
+.resume-editor:focus { border-color: #4facfe; }
+.resume-actions { display: flex; gap: 10px; margin-top: 14px; }
+.upload-zone { border: 2px dashed #c0cfe8; border-radius: 12px; padding: 32px; text-align: center; color: #99a; cursor: pointer; transition: all .2s; margin-bottom: 14px; }
+.upload-zone:hover { border-color: #4facfe; color: #4facfe; background: #f8faff; }
+.skill-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.skill-pill { padding: 4px 12px; background: #f0f8ff; color: #4facfe; border-radius: 12px; font-size: 12px; cursor: pointer; transition: all .15s; }
+.skill-pill:hover { background: #4facfe; color: #fff; }
+
+/* ── 市场洞察 ── */
+.insights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.chart-tall { height: 300px; }
+
+/* ── AI 对话 ── */
+.chat-layout { display: grid; grid-template-columns: 1fr 280px; gap: 16px; height: calc(100vh - 130px); }
+.chat-main { display: flex; flex-direction: column; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.chat-box { flex: 1; overflow-y: auto; padding: 20px; }
+.chat-msg { margin-bottom: 16px; }
+.chat-msg.user { text-align: right; }
+.chat-bubble { display: inline-block; padding: 10px 16px; border-radius: 18px; max-width: 80%; text-align: left; font-size: 14px; line-height: 1.6; }
+.chat-msg.user .chat-bubble { background: #4facfe; color: #fff; border-radius: 18px 18px 4px 18px; }
+.chat-msg.bot .chat-bubble { background: #f0f4ff; color: #334; border-radius: 18px 18px 18px 4px; }
+.chat-label { font-size: 11px; color: #aab; margin-bottom: 4px; }
+.chat-input-row { display: flex; gap: 10px; padding: 14px; border-top: 1px solid #f0f2f5; }
+.chat-input { flex: 1; padding: 10px 16px; border: 1.5px solid #e0e6ef; border-radius: 20px; font-size: 14px; outline: none; }
+.chat-input:focus { border-color: #4facfe; }
+.chat-send { padding: 10px 20px; background: #4facfe; color: #fff; border: none; border-radius: 20px; font-size: 14px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+.chat-send:disabled { background: #b0c8f0; cursor: default; }
+.chat-suggestions { padding: 16px; }
+.chat-suggest-title { font-size: 12px; color: #99a; margin-bottom: 8px; font-weight: 600; }
+.suggest-btn { display: block; width: 100%; padding: 8px 12px; border: 1.5px solid #e0e6ef; border-radius: 8px; font-size: 12px; color: #556; cursor: pointer; margin-bottom: 6px; text-align: left; background: #fff; transition: all .15s; }
+.suggest-btn:hover { border-color: #4facfe; color: #4facfe; background: #f0f8ff; }
+.thinking { color: #aab; font-size: 13px; }
+.thinking::after { content: ''; animation: dots 1.2s infinite; }
+@keyframes dots { 0%,20%{content:'.'} 40%{content:'..'} 60%,100%{content:'...'} }
+
+/* ── 数据覆盖 ── */
+.coverage-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.coverage-table th { background: #f8faff; color: #556; padding: 10px 14px; text-align: center; font-weight: 600; border-bottom: 2px solid #e8ecf0; }
+.coverage-table th:first-child { text-align: left; }
+.coverage-table td { padding: 11px 14px; border-bottom: 1px solid #f0f2f5; text-align: center; }
+.coverage-table td:first-child { text-align: left; font-weight: 600; color: #334; }
+.cov-yes { color: #059669; font-size: 18px; }
+.cov-no { display: inline-flex; align-items: center; justify-content: center; }
+.unlock-btn { padding: 4px 12px; border: 1.5px solid #c0cfe8; border-radius: 12px; font-size: 11px; color: #99a; cursor: pointer; background: #fff; transition: all .15s; white-space: nowrap; }
+.unlock-btn:hover { border-color: #4facfe; color: #4facfe; }
+.coverage-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px; }
+
+/* ── 弹窗 ── */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 1000; align-items: center; justify-content: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: #fff; border-radius: 16px; padding: 28px; width: 440px; max-width: 90vw; }
+.modal-title { font-size: 18px; font-weight: 700; color: #1a2332; margin-bottom: 6px; }
+.modal-sub { font-size: 13px; color: #99a; margin-bottom: 20px; }
+.modal-field { margin-bottom: 14px; }
+.modal-field label { display: block; font-size: 12px; color: #556; font-weight: 600; margin-bottom: 6px; }
+.modal-field input, .modal-field select { width: 100%; padding: 10px 14px; border: 1.5px solid #e0e6ef; border-radius: 8px; font-size: 14px; outline: none; }
+.modal-field input:focus, .modal-field select:focus { border-color: #4facfe; }
+.modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+.modal-cancel { flex: 1; padding: 10px; border: 1.5px solid #e0e6ef; border-radius: 8px; font-size: 14px; cursor: pointer; background: #fff; color: #556; }
+.modal-submit { flex: 1; padding: 10px; background: #4facfe; color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600; }
+.modal-submit:hover { background: #357abd; }
+
+/* ── Toast ── */
+.toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: #1a2332; color: #fff; padding: 12px 24px; border-radius: 24px; font-size: 14px; opacity: 0; transition: opacity .3s; z-index: 9999; pointer-events: none; }
+.toast.show { opacity: 1; }
+
+/* Markdown 渲染 */
+.md h2 { font-size: 14px; font-weight: 700; color: #1a2332; margin: 14px 0 6px; padding-bottom: 4px; border-bottom: 1px solid #f0f2f5; }
+.md h3 { font-size: 13px; font-weight: 700; color: #334; margin: 10px 0 4px; }
+.md p { margin-bottom: 6px; font-size: 13px; color: #445; line-height: 1.7; }
+.md ul { margin: 4px 0 8px 18px; }
+.md li { font-size: 13px; color: #445; line-height: 1.7; margin-bottom: 3px; }
+.md strong { color: #1a2332; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- 侧边栏 -->
+<div class="sidebar">
+  <div class="logo">JobLens <span>AI 求职分析平台</span></div>
+  <div class="nav-item active" onclick="showPage('dashboard',this)" data-page="dashboard">
+    <span class="nav-icon">📊</span> 数据仪表盘
+  </div>
+  <div class="nav-item" onclick="showPage('jobs',this)" data-page="jobs">
+    <span class="nav-icon">💼</span> 岗位列表
+    <span class="nav-badge" id="jobCountBadge">-</span>
+  </div>
+  <div class="nav-item" onclick="showPage('resume',this)" data-page="resume">
+    <span class="nav-icon">📄</span> 我的简历
+  </div>
+  <div class="nav-item" onclick="showPage('insights',this)" data-page="insights">
+    <span class="nav-icon">📈</span> 市场洞察
+  </div>
+  <div class="nav-item" onclick="showPage('chat',this)" data-page="chat">
+    <span class="nav-icon">🤖</span> AI 对话
+  </div>
+  <div class="nav-item" onclick="showPage('coverage',this)" data-page="coverage">
+    <span class="nav-icon">🗺️</span> 数据覆盖
+  </div>
+  <div class="sidebar-footer">
+    数据实时更新<br/>
+    <span class="data-tag" id="sidebarUpdate">● 最新数据</span>
+  </div>
+</div>
+
+<!-- 主内容 -->
+<div class="main">
+  <div class="topbar">
+    <div>
+      <div class="topbar-title" id="topbarTitle">数据仪表盘</div>
+      <div class="topbar-sub" id="topbarSub">AI求职分析平台 · 深圳 AI/大模型方向</div>
+    </div>
+    <div class="topbar-right">
+      <input class="search-box" id="globalSearch" placeholder="搜索岗位、公司..." onkeydown="if(event.key==='Enter')globalSearchJobs()"/>
+      <div class="avatar">J</div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- 仪表盘 -->
+    <div class="page active" id="page-dashboard">
+      <div class="stats-row" id="statsRow">
+        <div class="stat-card"><div class="stat-icon">💼</div><div class="stat-label">在招岗位</div><div class="stat-value" id="stat-jobs">-</div><div class="stat-sub">实时更新</div></div>
+        <div class="stat-card"><div class="stat-icon">🏢</div><div class="stat-label">招聘公司</div><div class="stat-value" id="stat-companies">-</div><div class="stat-sub">覆盖主要雇主</div></div>
+        <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-label">平均薪资</div><div class="stat-value" id="stat-salary">-</div><div class="stat-sub">K/月</div></div>
+        <div class="stat-card"><div class="stat-icon">📍</div><div class="stat-label">覆盖城市</div><div class="stat-value" id="stat-cities">5</div><div class="stat-sub">北上广深杭</div></div>
+      </div>
+      <div class="charts-row">
+        <div class="card">
+          <div class="section-title">薪资分布</div>
+          <div class="chart-box" id="chart-salary"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">热门技能 Top10</div>
+          <div class="chart-box" id="chart-skills"></div>
+        </div>
+      </div>
+      <div class="charts-row">
+        <div class="card">
+          <div class="section-title">招聘趋势</div>
+          <div class="chart-box" id="chart-trend"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">最新上架岗位</div>
+          <div id="latestJobs"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 岗位列表 -->
+    <div class="page" id="page-jobs">
+      <div class="list-layout">
+        <div class="filter-panel">
+          <div class="filter-group">
+            <div class="filter-label">城市</div>
+            <span class="filter-tag on" onclick="toggleFilter(this,'city','')">全部</span>
+            <span class="filter-tag" onclick="toggleFilter(this,'city','深圳')">深圳</span>
+            <span class="filter-tag" onclick="toggleFilter(this,'city','北京')">北京</span>
+            <span class="filter-tag" onclick="toggleFilter(this,'city','上海')">上海</span>
+            <span class="filter-tag" onclick="toggleFilter(this,'city','广州')">广州</span>
+            <span class="filter-tag" onclick="toggleFilter(this,'city','杭州')">杭州</span>
+          </div>
+          <div class="filter-group">
+            <div class="filter-label">经验要求</div>
+            <span class="filter-tag on" onclick="toggleFilter(this,'exp','')">全部</span>
+            <span class="filter-tag" onclick="toggleFilter(this,'exp','campus')">应届/不限</span>
+            <span class="filter-tag" onclick="toggleFilter(this,'exp','experienced')">有经验</span>
+          </div>
+          <div class="filter-group">
+            <div class="filter-label">薪资范围 (K/月)</div>
+            <div class="salary-range">
+              <input type="number" id="salaryMin" placeholder="最低" min="0" max="200"/>
+              <span>-</span>
+              <input type="number" id="salaryMax" placeholder="最高" min="0" max="200"/>
+            </div>
+          </div>
+          <button class="apply-btn" onclick="applyFilters()">应用筛选</button>
+          <button class="apply-btn" style="background:#f5f7fa;color:#556;margin-top:6px;" onclick="resetFilters()">重置</button>
+        </div>
+        <div>
+          <div class="sort-bar">
+            <button class="sort-btn active" onclick="setSort(this,'salary_desc')">薪资最高</button>
+            <button class="sort-btn" onclick="setSort(this,'salary_asc')">薪资最低</button>
+            <button class="sort-btn" onclick="setSort(this,'recent')">最新</button>
+            <span class="result-count" id="resultCount"></span>
+          </div>
+          <div class="job-list" id="jobList"></div>
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 岗位详情 -->
+    <div class="page" id="page-detail">
+      <div class="back-btn" onclick="showPage('jobs', document.querySelector('[data-page=jobs]'))">← 返回列表</div>
+      <div class="detail-layout">
+        <div class="detail-main">
+          <div class="card detail-header" id="detailHeader"></div>
+          <div class="card">
+            <div class="section-title">岗位描述</div>
+            <div class="jd-content" id="detailJD"></div>
+          </div>
+        </div>
+        <div class="detail-sidebar">
+          <!-- 匹配评分 -->
+          <div class="card" id="matchCard">
+            <div class="section-title">简历匹配度</div>
+            <div id="matchContent"><div style="color:#aab;font-size:13px;">请先完善「我的简历」后查看匹配度</div></div>
+          </div>
+          <!-- Gap 分析 -->
+          <div class="card">
+            <div class="section-title">Gap 分析 <button onclick="runGapAnalysis()" style="float:right;padding:3px 10px;border:1.5px solid #4facfe;color:#4facfe;background:#fff;border-radius:10px;font-size:11px;cursor:pointer;">分析</button></div>
+            <div id="gapContent" class="md" style="color:#aab;font-size:13px;">点击「分析」生成与当前岗位的差距分析</div>
+          </div>
+          <!-- 公司情报 -->
+          <div class="card">
+            <div class="section-title">公司情报 <button onclick="runCompanyIntel()" style="float:right;padding:3px 10px;border:1.5px solid #4facfe;color:#4facfe;background:#fff;border-radius:10px;font-size:11px;cursor:pointer;">解读</button></div>
+            <div id="intelContent" class="md" style="color:#aab;font-size:13px;">点击「解读」分析公司业务方向和面试重点</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 我的简历 -->
+    <div class="page" id="page-resume">
+      <div class="resume-layout">
+        <div class="card">
+          <div class="section-title">简历内容</div>
+          <p style="font-size:12px;color:#aab;margin-bottom:10px;">直接粘贴或编辑简历文字，AI 分析功能将基于此内容运行。数据仅保存在本地浏览器中。</p>
+          <textarea class="resume-editor" id="resumeEditor" placeholder="粘贴你的简历内容...
+
+示例：
+姓名：张三
+学历：本科 · 计算机科学与技术
+
+技术技能：
+- Python、FastAPI、Flask
+- LangChain、RAG 检索增强
+- 熟悉 Docker 容器化部署
+- 了解 Transformer 架构
+
+项目经验：
+1. B站数据 AI 分析助手
+   - 基于 Claude API 实现 Text-to-SQL
+   - 实现流式输出、意图识别
+   ..."></textarea>
+          <div class="resume-actions">
+            <button class="btn-primary" onclick="saveResume()">保存简历</button>
+            <button class="btn-secondary" onclick="document.getElementById('pdfInput').click()">上传 PDF</button>
+            <input type="file" id="pdfInput" accept=".pdf,.txt,.doc,.docx" style="display:none" onchange="handleFileUpload(event)"/>
+          </div>
+        </div>
+        <div>
+          <div class="card" style="margin-bottom:14px;">
+            <div class="section-title">技能标签</div>
+            <p style="font-size:12px;color:#aab;margin-bottom:10px;">从简历中自动识别的技能（点击可复制）</p>
+            <div class="skill-pills" id="skillPills"></div>
+          </div>
+          <div class="card">
+            <div class="section-title">简历完整度</div>
+            <div id="resumeCompleteness" style="font-size:13px;color:#aab;">请先填写简历内容</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 市场洞察 -->
+    <div class="page" id="page-insights">
+      <div class="insights-grid">
+        <div class="card">
+          <div class="section-title">薪资分布直方图</div>
+          <div class="chart-tall" id="chart-salary-insight"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">高频技能排行</div>
+          <div class="chart-tall" id="chart-skills-insight"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">企业薪资对比</div>
+          <div class="chart-tall" id="chart-company-salary"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">招聘趋势</div>
+          <div class="chart-tall" id="chart-trend-insight"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 对话 -->
+    <div class="page" id="page-chat">
+      <div class="chat-layout">
+        <div class="chat-main">
+          <div class="chat-box" id="chatBox">
+            <div class="chat-msg bot">
+              <div class="chat-label">AI 助手</div>
+              <div class="chat-bubble">你好！我是 JobLens AI 助手，可以帮你分析招聘市场、解读岗位要求、制定求职策略。你有什么想了解的？</div>
+            </div>
+          </div>
+          <div class="chat-input-row">
+            <input class="chat-input" id="chatInput" placeholder="问我任何关于求职的问题..." onkeydown="if(event.key==='Enter')sendChat()"/>
+            <button class="chat-send" id="chatSend" onclick="sendChat()">发送</button>
+          </div>
+        </div>
+        <div class="card chat-suggestions">
+          <div class="chat-suggest-title">快捷提问</div>
+          <button class="suggest-btn" onclick="askChat('当前数据库中薪资最高的岗位有哪些？')">薪资最高的岗位</button>
+          <button class="suggest-btn" onclick="askChat('应届生有哪些合适的岗位推荐？')">应届生岗位推荐</button>
+          <button class="suggest-btn" onclick="askChat('AI工程师方向最需要哪些技能？')">AI工程师必备技能</button>
+          <button class="suggest-btn" onclick="askChat('如何准备大模型应用开发的面试？')">面试准备建议</button>
+          <button class="suggest-btn" onclick="askChat('目前市场对RAG和Agent的需求怎么样？')">RAG/Agent 市场需求</button>
+          <button class="suggest-btn" onclick="askChat('哪些公司在做AI应用方向，适合投递？')">推荐投递公司</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 数据覆盖 -->
+    <div class="page" id="page-coverage">
+      <div class="coverage-stats">
+        <div class="stat-card"><div class="stat-icon">✅</div><div class="stat-label">已覆盖组合</div><div class="stat-value" id="coveredCount">-</div><div class="stat-sub">城市×行业</div></div>
+        <div class="stat-card"><div class="stat-icon">🔄</div><div class="stat-label">数据更新频率</div><div class="stat-value">每6h</div><div class="stat-sub">自动增量爬取</div></div>
+        <div class="stat-card"><div class="stat-icon">📬</div><div class="stat-label">待覆盖申请</div><div class="stat-value" id="pendingCount">0</div><div class="stat-sub">预计3-7天上线</div></div>
+      </div>
+      <div class="card">
+        <div class="section-title" style="margin-bottom:16px;">城市 × 行业覆盖矩阵 <span style="font-size:12px;color:#aab;font-weight:400;margin-left:8px;">✅ 已覆盖 · 点击「申请开通」添加数据</span></div>
+        <div style="overflow-x:auto;">
+          <table class="coverage-table" id="coverageTable">
+            <thead>
+              <tr>
+                <th>行业</th>
+                <th>北京</th><th>上海</th><th>深圳</th><th>广州</th><th>杭州</th>
+              </tr>
+            </thead>
+            <tbody id="coverageTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<!-- 申请开通弹窗 -->
+<div class="modal-overlay" id="unlockModal">
+  <div class="modal">
+    <div class="modal-title">申请开通数据覆盖</div>
+    <div class="modal-sub">提交后将在 3-7 天内完成数据爬取并上线</div>
+    <div class="modal-field">
+      <label>城市</label>
+      <input type="text" id="modalCity" readonly style="background:#f8faff;"/>
+    </div>
+    <div class="modal-field">
+      <label>行业</label>
+      <input type="text" id="modalIndustry" readonly style="background:#f8faff;"/>
+    </div>
+    <div class="modal-field">
+      <label>通知邮箱（可选）</label>
+      <input type="email" id="modalEmail" placeholder="上线后发邮件通知你"/>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal()">取消</button>
+      <button class="modal-submit" onclick="submitUnlock()">确认申请</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── 状态 ──────────────────────────────────────────────────
+var currentPage = 'dashboard';
+var jobFilters = { city:'', exp:'', salary_min:'', salary_max:'' };
+var jobSort = 'salary_desc';
+var jobPage = 1;
+var currentJobId = null;
+var chatHistory = [];
+
+// ── 工具函数 ──────────────────────────────────────────────
+function showToast(msg, duration) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, duration || 2500);
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderMarkdown(text) {
+  return text
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, function(m){ return '<ul>'+m+'</ul>'; })
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/^(?!<[hul])(.+)$/gm, '<p>$1</p>');
+}
+
+// ── 导航 ──────────────────────────────────────────────────
+function showPage(name, navEl) {
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+  document.querySelectorAll('.nav-item').forEach(function(n){ n.classList.remove('active'); });
+  document.getElementById('page-'+name).classList.add('active');
+  if(navEl) navEl.classList.add('active');
+  currentPage = name;
+
+  var titles = {
+    dashboard: ['数据仪表盘', 'AI求职分析平台 · 实时招聘数据'],
+    jobs: ['岗位列表', '筛选 · 排序 · 一键查看详情'],
+    detail: ['岗位详情', '公司情报 · Gap分析 · 面试建议'],
+    resume: ['我的简历', '本地存储 · AI匹配基准'],
+    insights: ['市场洞察', '薪资分布 · 技能热度 · 趋势分析'],
+    chat: ['AI 对话', '基于实时数据的智能求职助手'],
+    coverage: ['数据覆盖', '城市×行业覆盖矩阵 · 申请开通'],
+  };
+  var t = titles[name] || [name,''];
+  document.getElementById('topbarTitle').textContent = t[0];
+  document.getElementById('topbarSub').textContent = t[1];
+
+  if(name==='dashboard' && !window._dashboardLoaded) loadDashboard();
+  if(name==='jobs' && !window._jobsLoaded) loadJobs();
+  if(name==='insights') loadInsights();
+  if(name==='coverage') loadCoverage();
+  if(name==='resume') loadResume();
+}
+
+// ── 仪表盘 ────────────────────────────────────────────────
+function loadDashboard() {
+  window._dashboardLoaded = true;
+  fetch('/api/stats').then(r=>r.json()).then(function(d){
+    document.getElementById('stat-jobs').textContent = d.total_jobs || 0;
+    document.getElementById('stat-companies').textContent = d.total_companies || 0;
+    document.getElementById('stat-salary').textContent = d.avg_salary ? d.avg_salary+'K' : '-';
+    document.getElementById('stat-cities').textContent = d.cities ? d.cities.length : 5;
+    document.getElementById('jobCountBadge').textContent = d.total_jobs || 0;
+  });
+
+  fetch('/api/salary_distribution').then(r=>r.json()).then(function(d){
+    initChart('chart-salary', {
+      tooltip:{trigger:'axis'},
+      xAxis:{type:'category',data:d.labels,axisLabel:{fontSize:11}},
+      yAxis:{type:'value',name:'岗位数'},
+      series:[{type:'bar',data:d.counts,itemStyle:{color:'#4facfe',borderRadius:[4,4,0,0]}}],
+      grid:{left:40,right:16,top:20,bottom:40}
+    });
+  });
+
+  fetch('/api/skill_ranking').then(r=>r.json()).then(function(d){
+    initChart('chart-skills', {
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+      xAxis:{type:'value'},
+      yAxis:{type:'category',data:d.labels.slice(0,10).reverse(),axisLabel:{fontSize:11}},
+      series:[{type:'bar',data:d.counts.slice(0,10).reverse(),itemStyle:{color:'#00f2fe',borderRadius:[0,4,4,0]}}],
+      grid:{left:80,right:20,top:10,bottom:20}
+    });
+  });
+
+  fetch('/api/hiring_trend').then(r=>r.json()).then(function(d){
+    initChart('chart-trend', {
+      tooltip:{trigger:'axis'},
+      legend:{data:['招聘数','平均薪资(K)'],top:0,right:0,textStyle:{fontSize:11}},
+      xAxis:{type:'category',data:d.labels},
+      yAxis:[{type:'value',name:'岗位数'},{type:'value',name:'K/月'}],
+      series:[
+        {name:'招聘数',type:'bar',data:d.job_count,itemStyle:{color:'rgba(79,172,254,.5)'}},
+        {name:'平均薪资(K)',type:'line',yAxisIndex:1,data:d.avg_salary,smooth:true,lineStyle:{color:'#ff6b6b'},symbol:'none'}
+      ],
+      grid:{left:40,right:50,top:36,bottom:30}
+    });
+  });
+
+  fetch('/api/job_list?per_page=5&sort=recent').then(r=>r.json()).then(function(d){
+    var html = '';
+    (d.items||[]).forEach(function(j){
+      var score = getMatchScore(j.job_id);
+      var badgeCls = score>=80?'match-high':score>=60?'match-mid':'match-low';
+      var logo = (j.company_name||'?')[0];
+      html += '<div class="job-mini" onclick="openJobDetail(\''+escHtml(j.job_id)+'\')" style="cursor:pointer;">'
+        + '<div class="company-logo">'+escHtml(logo)+'</div>'
+        + '<div class="job-mini-info"><div class="job-mini-title">'+escHtml(j.title)+'</div>'
+        + '<div class="job-mini-sub">'+escHtml(j.company_name)+' · '+escHtml(j.salary)+'</div></div>'
+        + (score ? '<span class="match-badge '+badgeCls+'">'+score+'%</span>' : '')
+        + '</div>';
+    });
+    document.getElementById('latestJobs').innerHTML = html || '<div style="color:#aab;font-size:13px;">暂无数据</div>';
+  });
+}
+
+// ── 岗位列表 ──────────────────────────────────────────────
+function loadJobs(page) {
+  window._jobsLoaded = true;
+  jobPage = page || 1;
+  var params = new URLSearchParams({
+    page: jobPage, sort: jobSort,
+    city: jobFilters.city, exp: jobFilters.exp,
+    per_page: 15,
+  });
+  if(jobFilters.salary_min) params.set('salary_min', jobFilters.salary_min);
+  if(jobFilters.salary_max) params.set('salary_max', jobFilters.salary_max);
+
+  document.getElementById('jobList').innerHTML = '<div style="color:#aab;padding:30px 0;text-align:center;">加载中...</div>';
+
+  fetch('/api/job_list?'+params).then(r=>r.json()).then(function(d){
+    document.getElementById('resultCount').textContent = '共 '+d.total+' 条岗位';
+    var html = '';
+    if(!d.items || d.items.length===0) {
+      html = '<div class="empty-state"><div class="empty-icon">🔍</div><div>没有找到符合条件的岗位</div></div>';
+    } else {
+      d.items.forEach(function(j){
+        var tags = (j.skill_tags||[]).slice(0,4).map(function(t){ return '<span class="job-tag">'+escHtml(t)+'</span>'; }).join('');
+        var score = getMatchScore(j.job_id);
+        var badgeCls = score>=80?'match-high':score>=60?'match-mid':'match-low';
+        html += '<div class="job-card" onclick="openJobDetail(\''+escHtml(j.job_id)+'\')">'
+          + '<div class="job-card-top">'
+          + '<div><div class="job-title">'+escHtml(j.title)+'</div><div class="job-company">🏢 '+escHtml(j.company_name)+' · '+escHtml(j.city||'')+(j.area?' · '+escHtml(j.area):'')+'</div></div>'
+          + '<div style="text-align:right"><div class="job-salary">'+escHtml(j.salary)+'</div>'
+          + (score ? '<div><span class="match-badge '+badgeCls+'" style="margin-top:4px;display:inline-block;">匹配 '+score+'%</span></div>' : '')
+          + '</div></div>'
+          + '<div class="job-tags">'+tags
+          + '<span class="job-tag gray">'+escHtml(j.experience)+'</span>'
+          + (j.education?'<span class="job-tag gray">'+escHtml(j.education)+'</span>':'')
+          + '</div>'
+          + '<div class="job-footer"><span class="job-meta">📅 '+escHtml(j.last_seen_at||'')+'</span>'
+          + '<span class="job-meta" style="color:#4facfe;cursor:pointer;" onclick="event.stopPropagation();window.open(\''+escHtml(j.url||'#')+'\',\'_blank\')">查看原帖 →</span>'
+          + '</div></div>';
+      });
+    }
+    document.getElementById('jobList').innerHTML = html;
+    renderPagination(d.total, d.page, d.per_page);
+  });
+}
+
+function renderPagination(total, page, perPage) {
+  var totalPages = Math.ceil(total / perPage);
+  if(totalPages<=1){ document.getElementById('pagination').innerHTML=''; return; }
+  var html = '';
+  if(page>1) html += '<button class="page-btn" onclick="loadJobs('+( page-1)+')">‹ 上一页</button>';
+  var start = Math.max(1, page-2), end = Math.min(totalPages, page+2);
+  for(var i=start;i<=end;i++){
+    html += '<button class="page-btn'+(i===page?' active':'')+'" onclick="loadJobs('+i+')">'+i+'</button>';
+  }
+  if(page<totalPages) html += '<button class="page-btn" onclick="loadJobs('+(page+1)+')">下一页 ›</button>';
+  document.getElementById('pagination').innerHTML = html;
+}
+
+function toggleFilter(el, key, val) {
+  var siblings = el.parentElement.querySelectorAll('.filter-tag');
+  siblings.forEach(function(s){ s.classList.remove('on'); });
+  el.classList.add('on');
+  jobFilters[key] = val;
+}
+
+function applyFilters() {
+  jobFilters.salary_min = document.getElementById('salaryMin').value || '';
+  jobFilters.salary_max = document.getElementById('salaryMax').value || '';
+  loadJobs(1);
+}
+
+function resetFilters() {
+  jobFilters = {city:'',exp:'',salary_min:'',salary_max:''};
+  document.getElementById('salaryMin').value = '';
+  document.getElementById('salaryMax').value = '';
+  document.querySelectorAll('.filter-tag').forEach(function(t,i){
+    t.classList.remove('on');
+    if(t.textContent.trim()==='全部') t.classList.add('on');
+  });
+  loadJobs(1);
+}
+
+function setSort(btn, sort) {
+  document.querySelectorAll('.sort-btn').forEach(function(b){ b.classList.remove('active'); });
+  btn.classList.add('active');
+  jobSort = sort;
+  loadJobs(1);
+}
+
+function globalSearchJobs() {
+  var q = document.getElementById('globalSearch').value.trim();
+  if(!q) return;
+  showPage('jobs', document.querySelector('[data-page=jobs]'));
+  jobFilters.keyword = q;
+  var params = new URLSearchParams({page:1,sort:jobSort,keyword:q,per_page:15});
+  document.getElementById('jobList').innerHTML = '<div style="color:#aab;padding:30px 0;text-align:center;">搜索中...</div>';
+  fetch('/api/job_list?'+params).then(r=>r.json()).then(function(d){
+    document.getElementById('resultCount').textContent = '共 '+d.total+' 条结果';
+    var html = '';
+    (d.items||[]).forEach(function(j){
+      var tags = (j.skill_tags||[]).slice(0,4).map(function(t){ return '<span class="job-tag">'+escHtml(t)+'</span>'; }).join('');
+      html += '<div class="job-card" onclick="openJobDetail(\''+escHtml(j.job_id)+'\')">'
+        + '<div class="job-card-top"><div><div class="job-title">'+escHtml(j.title)+'</div>'
+        + '<div class="job-company">🏢 '+escHtml(j.company_name)+' · '+escHtml(j.salary)+'</div></div></div>'
+        + '<div class="job-tags">'+tags+'</div></div>';
+    });
+    document.getElementById('jobList').innerHTML = html || '<div class="empty-state"><div class="empty-icon">🔍</div><div>无匹配结果</div></div>';
+    document.getElementById('pagination').innerHTML = '';
+  });
+}
+
+// ── 岗位详情 ──────────────────────────────────────────────
+function openJobDetail(jobId) {
+  currentJobId = jobId;
+  showPage('detail', null);
+  document.querySelector('[data-page=jobs]').classList.remove('active');
+
+  fetch('/api/job_detail/'+encodeURIComponent(jobId)).then(r=>r.json()).then(function(j){
+    if(j.error){ document.getElementById('detailHeader').innerHTML='<div style="color:#e85d5d;">'+escHtml(j.error)+'</div>'; return; }
+
+    var tags = (j.skill_tags||[]).map(function(t){ return '<span class="detail-skill-tag">'+escHtml(t)+'</span>'; }).join('');
+    document.getElementById('detailHeader').innerHTML =
+      '<div class="detail-title">'+escHtml(j.title)+'</div>'
+      + '<div class="detail-salary">'+escHtml(j.salary)+'</div>'
+      + '<div class="detail-meta">'
+      + '<span>🏢 '+escHtml(j.company_name)+'</span>'
+      + '<span>📍 '+escHtml(j.city||'')+(j.area?' · '+escHtml(j.area):'')+'</span>'
+      + '<span>💼 '+escHtml(j.experience)+'</span>'
+      + (j.education?'<span>🎓 '+escHtml(j.education)+'</span>':'')
+      + (j.company_scale?'<span>👥 '+escHtml(j.company_scale)+'</span>':'')
+      + (j.company_financing?'<span>💹 '+escHtml(j.company_financing)+'</span>':'')
+      + '</div>'
+      + (tags ? '<div class="detail-skill-tags">'+tags+'</div>' : '')
+      + '<div class="detail-actions">'
+      + (j.url?'<button class="btn-primary" onclick="window.open(\''+escHtml(j.url)+'\',\'_blank\')">投递岗位</button>':'')
+      + '<button class="btn-secondary" onclick="runGapAnalysis()">Gap 分析</button>'
+      + '<button class="btn-secondary" onclick="runCompanyIntel()">公司情报</button>'
+      + '</div>';
+
+    document.getElementById('detailJD').textContent = j.description || '暂无岗位描述';
+
+    // 匹配评分
+    var resume = localStorage.getItem('joblens_resume') || '';
+    if(resume.trim()) {
+      document.getElementById('matchContent').innerHTML = '<div style="color:#aab;font-size:13px;">计算中...</div>';
+      fetch('/api/match', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({resume:resume, job_id:jobId})
+      }).then(r=>r.json()).then(function(m){
+        var score = m.score || 0;
+        var cls = score>=80?'score-high':score>=60?'score-mid':'score-low';
+        var matchedHtml = (m.matched||[]).map(function(t){ return '<span class="matched-tag">'+escHtml(t)+'</span>'; }).join('');
+        document.getElementById('matchContent').innerHTML =
+          '<div class="match-score-big">'
+          + '<div class="score-circle '+cls+'">'+score+'</div>'
+          + '<div class="score-info"><div class="score-label">匹配度</div><div class="score-reason">'+escHtml(m.reason||'')+'</div></div>'
+          + '</div>'
+          + (matchedHtml ? '<div>'+matchedHtml+'</div>' : '');
+        saveMatchScore(jobId, score);
+      }).catch(function(){
+        document.getElementById('matchContent').innerHTML = '<div style="color:#aab;font-size:13px;">评分失败，请检查 API 配置</div>';
+      });
+    }
+  });
+}
+
+function runGapAnalysis() {
+  var resume = localStorage.getItem('joblens_resume') || '';
+  if(!resume.trim()){ showToast('请先在「我的简历」页面填写简历内容'); return; }
+  if(!currentJobId){ showToast('请先打开一个岗位'); return; }
+  document.getElementById('gapContent').innerHTML = '<span class="thinking">AI 正在分析差距</span>';
+  var text = '';
+  fetch('/api/gap?job_id='+encodeURIComponent(currentJobId)+'&resume='+encodeURIComponent(resume))
+    .then(function(resp){ return sseStream(resp, 'gapContent', text); });
+}
+
+function runCompanyIntel() {
+  if(!currentJobId){ showToast('请先打开一个岗位'); return; }
+  document.getElementById('intelContent').innerHTML = '<span class="thinking">AI 正在解读公司情报</span>';
+  var text = '';
+  fetch('/api/company_intel?job_id='+encodeURIComponent(currentJobId))
+    .then(function(resp){ return sseStream(resp, 'intelContent', text); });
+}
+
+function sseStream(resp, elId, text) {
+  var reader = resp.body.getReader();
+  var decoder = new TextDecoder();
+  var buf = '';
+  var accText = '';
+  function read() {
+    reader.read().then(function(result){
+      if(result.done) return;
+      buf += decoder.decode(result.value, {stream:true});
+      var parts = buf.split('\n\n');
+      buf = parts.pop();
+      parts.forEach(function(part){
+        if(!part.startsWith('data: ')) return;
+        try {
+          var chunk = JSON.parse(part.slice(6));
+          if(chunk.type==='text') {
+            accText += chunk.text;
+            document.getElementById(elId).innerHTML = '<div class="md">'+renderMarkdown(escHtml(accText))+'</div>';
+          } else if(chunk.type==='error') {
+            document.getElementById(elId).innerHTML = '<div style="color:#e85d5d;">'+escHtml(chunk.error)+'</div>';
+          }
+        } catch(e){}
+      });
+      read();
+    });
+  }
+  read();
+}
+
+// ── 简历管理 ──────────────────────────────────────────────
+function loadResume() {
+  var saved = localStorage.getItem('joblens_resume') || '';
+  document.getElementById('resumeEditor').value = saved;
+  if(saved) extractSkills(saved);
+}
+
+function saveResume() {
+  var text = document.getElementById('resumeEditor').value.trim();
+  localStorage.setItem('joblens_resume', text);
+  extractSkills(text);
+  showToast('简历已保存到本地');
+}
+
+function extractSkills(text) {
+  var keywords = ['Python','Java','Go','C++','LangChain','LlamaIndex','RAG','Agent','FastAPI','Flask',
+    'Docker','Kubernetes','PyTorch','TensorFlow','Transformer','Embedding','向量数据库',
+    'React','Vue','TypeScript','Node.js','MySQL','PostgreSQL','Redis','MongoDB'];
+  var found = keywords.filter(function(k){ return text.toLowerCase().indexOf(k.toLowerCase())>-1; });
+  document.getElementById('skillPills').innerHTML = found.map(function(k){
+    return '<span class="skill-pill" onclick="navigator.clipboard.writeText(\''+k+'\').then(function(){ showToast(\'已复制: '+k+'\'); })">'+k+'</span>';
+  }).join('') || '<span style="color:#aab;font-size:13px;">填写简历后自动识别技能标签</span>';
+
+  var score = 0;
+  if(text.length>200) score+=25;
+  if(text.length>500) score+=15;
+  if(found.length>3) score+=20;
+  if(found.length>8) score+=15;
+  if(text.indexOf('项目')>-1||text.indexOf('经验')>-1) score+=15;
+  if(text.indexOf('学历')>-1||text.indexOf('本科')>-1||text.indexOf('硕士')>-1) score+=10;
+  score = Math.min(score, 100);
+  var color = score>=80?'#059669':score>=60?'#d97706':'#e11d48';
+  document.getElementById('resumeCompleteness').innerHTML =
+    '<div style="margin-bottom:8px;font-size:13px;color:'+color+';font-weight:700;">完整度：'+score+'%</div>'
+    + '<div style="background:#f0f2f5;border-radius:8px;height:8px;overflow:hidden;">'
+    + '<div style="width:'+score+'%;height:100%;background:'+color+';border-radius:8px;transition:width .5s;"></div></div>'
+    + '<div style="font-size:12px;color:#aab;margin-top:8px;">识别到 '+found.length+' 项技能标签</div>';
+}
+
+function handleFileUpload(event) {
+  var file = event.target.files[0];
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    document.getElementById('resumeEditor').value = e.target.result;
+    showToast('文件已读取，请确认内容后保存');
+    extractSkills(e.target.result);
+  };
+  reader.readAsText(file);
+}
+
+// ── 匹配分缓存 ────────────────────────────────────────────
+function saveMatchScore(jobId, score) {
+  try { var m=JSON.parse(localStorage.getItem('joblens_scores')||'{}'); m[jobId]=score; localStorage.setItem('joblens_scores',JSON.stringify(m)); } catch(e){}
+}
+function getMatchScore(jobId) {
+  try { return (JSON.parse(localStorage.getItem('joblens_scores')||'{}')||{})[jobId]||0; } catch(e){ return 0; }
+}
+
+// ── 市场洞察 ──────────────────────────────────────────────
+var _insightsLoaded = false;
+function loadInsights() {
+  if(_insightsLoaded) return;
+  _insightsLoaded = true;
+
+  fetch('/api/salary_distribution').then(r=>r.json()).then(function(d){
+    initChart('chart-salary-insight', {
+      tooltip:{trigger:'axis'},
+      xAxis:{type:'category',data:d.labels,axisLabel:{rotate:30,fontSize:11}},
+      yAxis:{type:'value',name:'岗位数'},
+      series:[{type:'bar',data:d.counts,itemStyle:{color:'#4facfe',borderRadius:[4,4,0,0]}}],
+      grid:{left:40,right:16,top:20,bottom:60}
+    });
+  });
+
+  fetch('/api/skill_ranking').then(r=>r.json()).then(function(d){
+    initChart('chart-skills-insight', {
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+      xAxis:{type:'value'},
+      yAxis:{type:'category',data:d.labels.slice(0,15).reverse(),axisLabel:{fontSize:11}},
+      series:[{type:'bar',data:d.counts.slice(0,15).reverse(),itemStyle:{color:'#00f2fe',borderRadius:[0,4,4,0]},label:{show:true,position:'right',fontSize:11}}],
+      grid:{left:100,right:40,top:10,bottom:10}
+    });
+  });
+
+  fetch('/api/company_salary_ranking').then(r=>r.json()).then(function(d){
+    initChart('chart-company-salary', {
+      tooltip:{trigger:'axis'},
+      xAxis:{type:'category',data:d.labels,axisLabel:{rotate:35,fontSize:10}},
+      yAxis:{type:'value',name:'平均薪资(K)'},
+      series:[{type:'bar',data:d.avg_salary,itemStyle:{color:'#667eea',borderRadius:[4,4,0,0]}}],
+      grid:{left:50,right:16,top:20,bottom:70}
+    });
+  });
+
+  fetch('/api/hiring_trend').then(r=>r.json()).then(function(d){
+    initChart('chart-trend-insight', {
+      tooltip:{trigger:'axis'},
+      legend:{data:['招聘数','平均薪资(K)'],top:0},
+      xAxis:{type:'category',data:d.labels},
+      yAxis:[{type:'value',name:'岗位数'},{type:'value',name:'K/月'}],
+      series:[
+        {name:'招聘数',type:'bar',data:d.job_count,itemStyle:{color:'rgba(79,172,254,.6)'}},
+        {name:'平均薪资(K)',type:'line',yAxisIndex:1,data:d.avg_salary,smooth:true,lineStyle:{color:'#ff6b6b'},symbol:'none'}
+      ],
+      grid:{left:40,right:50,top:36,bottom:30}
+    });
+  });
+}
+
+// ── AI 对话 ───────────────────────────────────────────────
+function askChat(q) {
+  showPage('chat', document.querySelector('[data-page=chat]'));
+  document.getElementById('chatInput').value = q;
+  sendChat();
+}
+
+function sendChat() {
+  var input = document.getElementById('chatInput');
+  var q = input.value.trim();
+  if(!q) return;
+  input.value = '';
+  var btn = document.getElementById('chatSend');
+  btn.disabled = true;
+
+  appendChatMsg('user', escHtml(q));
+  var thinkId = 'think_'+Date.now();
+  appendChatMsg('bot', '<span class="thinking" id="'+thinkId+'">AI 正在思考</span>');
+
+  var text = '';
+  var bubbleId = 'bubble_'+Date.now();
+  var bubbleCreated = false;
+
+  fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({question:q, history:chatHistory})
+  }).then(function(resp){
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder();
+    var buf = '';
+    function read(){
+      reader.read().then(function(result){
+        if(result.done){ btn.disabled=false; return; }
+        buf += decoder.decode(result.value,{stream:true});
+        var parts = buf.split('\n\n');
+        buf = parts.pop();
+        parts.forEach(function(part){
+          if(!part.startsWith('data: ')) return;
+          try {
+            var chunk = JSON.parse(part.slice(6));
+            if(chunk.type==='text') {
+              if(!bubbleCreated){
+                var el=document.getElementById(thinkId);
+                if(el) el.closest('.chat-msg').remove();
+                appendChatMsg('bot','<span id="'+bubbleId+'"></span>');
+                bubbleCreated=true;
+              }
+              text += chunk.text;
+              var el=document.getElementById(bubbleId);
+              if(el) el.textContent = text;
+              document.getElementById('chatBox').scrollTop=9999;
+            } else if(chunk.type==='done') {
+              chatHistory.push({role:'user',content:q});
+              chatHistory.push({role:'assistant',content:text});
+              btn.disabled=false;
+            } else if(chunk.type==='error') {
+              var el=document.getElementById(thinkId);
+              if(el) el.closest('.chat-msg').remove();
+              appendChatMsg('bot','<span style="color:#e85d5d;">'+escHtml(chunk.error)+'</span>');
+              btn.disabled=false;
+            }
+          } catch(e){}
+        });
+        read();
+      });
+    }
+    read();
+  }).catch(function(){
+    var el=document.getElementById(thinkId);
+    if(el) el.closest('.chat-msg').remove();
+    appendChatMsg('bot','<span style="color:#e85d5d;">请求失败，请重试</span>');
+    btn.disabled=false;
+  });
+}
+
+function appendChatMsg(role, content) {
+  var box = document.getElementById('chatBox');
+  var div = document.createElement('div');
+  div.className = 'chat-msg '+role;
+  div.innerHTML = '<div class="chat-label">'+(role==='user'?'你':'AI 助手')+'</div>'
+    + '<div class="chat-bubble">'+content+'</div>';
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ── 数据覆盖 ──────────────────────────────────────────────
+function loadCoverage() {
+  fetch('/api/coverage').then(r=>r.json()).then(function(data){
+    var cities = ['北京','上海','深圳','广州','杭州'];
+    var covered = 0, total = 0;
+    var html = '';
+    data.forEach(function(row){
+      html += '<tr><td>'+escHtml(row.industry)+'</td>';
+      cities.forEach(function(city){
+        total++;
+        if(row.cities[city]){
+          covered++;
+          html += '<td><span class="cov-yes">✅</span></td>';
+        } else {
+          html += '<td><span class="cov-no"><button class="unlock-btn" onclick="openUnlockModal(\''+escHtml(city)+'\',\''+escHtml(row.industry)+'\')">申请开通</button></span></td>';
+        }
+      });
+      html += '</tr>';
+    });
+    document.getElementById('coverageTbody').innerHTML = html;
+    document.getElementById('coveredCount').textContent = covered+'/'+total;
+  });
+}
+
+var _unlockCity='', _unlockIndustry='';
+function openUnlockModal(city, industry) {
+  _unlockCity=city; _unlockIndustry=industry;
+  document.getElementById('modalCity').value=city;
+  document.getElementById('modalIndustry').value=industry;
+  document.getElementById('modalEmail').value='';
+  document.getElementById('unlockModal').classList.add('show');
+}
+function closeModal() { document.getElementById('unlockModal').classList.remove('show'); }
+function submitUnlock() {
+  fetch('/api/request_coverage', {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({city:_unlockCity, industry:_unlockIndustry, email:document.getElementById('modalEmail').value})
+  }).then(r=>r.json()).then(function(d){
+    closeModal();
+    showToast(d.message || '申请已提交', 3000);
+    document.getElementById('pendingCount').textContent = (parseInt(document.getElementById('pendingCount').textContent)||0)+1;
+  });
+}
+
+// ── ECharts 初始化 ─────────────────────────────────────────
+var _charts = {};
+function initChart(id, option) {
+  var el = document.getElementById(id);
+  if(!el) return;
+  if(_charts[id]) { _charts[id].dispose(); }
+  var c = echarts.init(el);
+  c.setOption(option);
+  _charts[id] = c;
+}
+window.addEventListener('resize', function(){
+  Object.values(_charts).forEach(function(c){ try{c.resize();}catch(e){} });
+});
+
+// ── 初始化 ────────────────────────────────────────────────
+loadDashboard();
+</script>
+</body>
+</html>

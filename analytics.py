@@ -150,20 +150,26 @@ def _format_experience(job):
     return f"{job.experience_min}-{job.experience_max}年"
 
 
-def job_list(page=1, per_page=20, keyword=None, company=None, sort="salary_desc", exp=None):
-    """全量岗位招聘信息汇总（前端列表页用），支持按岗位关键词/公司名筛选、排序、分页"""
+def job_list(page=1, per_page=20, keyword=None, company=None, sort="salary_desc",
+            exp=None, city=None, salary_min=None, salary_max=None):
+    """全量岗位招聘信息汇总（前端列表页用），支持按岗位关键词/公司名/城市/薪资筛选、排序、分页"""
     from sqlalchemy import case, nulls_last
     query = Job.query.join(Company).filter(Job.is_active.is_(True))
     if keyword:
         like = f"%{keyword}%"
-        query = query.filter(db.or_(Job.title.like(like), Job.source_keyword.like(like)))
+        query = query.filter(db.or_(Job.title.like(like), Job.source_keyword.like(like),
+                                    Job.description.like(like)))
     if company:
         query = query.filter(Company.name.like(f"%{company}%"))
+    if city:
+        query = query.filter(Job.city == city)
+    if salary_min is not None:
+        query = query.filter(Job.salary_min >= salary_min)
+    if salary_max is not None:
+        query = query.filter(Job.salary_max <= salary_max)
     if exp == "campus":
-        # 经验不限 / 应届：experience_min=0
         query = query.filter(Job.experience_min == 0)
     elif exp == "experienced":
-        # 有明确经验年限要求：experience_min > 0
         query = query.filter(Job.experience_min > 0)
 
     monthly_first = db.case((Job.salary_unit == "K/月", 0), else_=1)
