@@ -872,13 +872,30 @@ function extractSkills(text) {
 function handleFileUpload(event) {
   var file = event.target.files[0];
   if(!file) return;
-  var reader = new FileReader();
-  reader.onload = function(e){
-    document.getElementById('resumeEditor').value = e.target.result;
-    showToast('文件已读取，请确认内容后保存');
-    extractSkills(e.target.result);
-  };
-  reader.readAsText(file);
+  var fname = file.name.toLowerCase();
+  if(fname.endsWith('.pdf')) {
+    // PDF 走后端解析
+    showToast('正在解析 PDF...');
+    var fd = new FormData();
+    fd.append('file', file);
+    fetch('/api/parse_resume', {method:'POST', body:fd})
+      .then(r=>r.json()).then(function(d){
+        if(d.error){ showToast('解析失败：'+d.error, 3000); return; }
+        document.getElementById('resumeEditor').value = d.text;
+        extractSkills(d.text);
+        showToast('PDF 解析成功，请确认内容后保存');
+      });
+  } else {
+    // TXT/DOC 直接读文本
+    var reader = new FileReader();
+    reader.onload = function(e){
+      document.getElementById('resumeEditor').value = e.target.result;
+      extractSkills(e.target.result);
+      showToast('文件已读取，请确认内容后保存');
+    };
+    reader.readAsText(file);
+  }
+  event.target.value = '';
 }
 
 // ── 匹配分缓存 ────────────────────────────────────────────

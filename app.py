@@ -129,6 +129,29 @@ def api_keyword_demand_trend():
     return jsonify(analytics.keyword_demand_trend())
 
 
+@app.route("/api/parse_resume", methods=["POST"])
+def api_parse_resume():
+    """解析上传的 PDF/TXT 简历，返回提取的文本"""
+    if "file" not in request.files:
+        return jsonify({"error": "请选择文件"}), 400
+    f = request.files["file"]
+    filename = f.filename.lower()
+    try:
+        if filename.endswith(".pdf"):
+            import pdfplumber, io
+            with pdfplumber.open(io.BytesIO(f.read())) as pdf:
+                text = "\n".join(
+                    page.extract_text() or "" for page in pdf.pages
+                ).strip()
+        else:
+            text = f.read().decode("utf-8", errors="ignore").strip()
+        if not text:
+            return jsonify({"error": "未能从文件中提取到文字内容"}), 400
+        return jsonify({"text": text})
+    except Exception as e:
+        return jsonify({"error": f"解析失败：{e}"}), 500
+
+
 @app.route("/api/filtered_job_list")
 def api_filtered_job_list():
     page = request.args.get("page", 1, type=int)
