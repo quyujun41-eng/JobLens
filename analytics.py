@@ -151,7 +151,7 @@ def _format_experience(job):
 
 
 def job_list(page=1, per_page=20, keyword=None, company=None, sort="salary_desc",
-            exp=None, city=None, salary_min=None, salary_max=None):
+            exp=None, city=None, salary_min=None, salary_max=None, bm25_ids=None):
     """全量岗位招聘信息汇总（前端列表页用），支持按岗位关键词/公司名/城市/薪资筛选、排序、分页"""
     from sqlalchemy import case, nulls_last
     query = Job.query.join(Company).filter(Job.is_active.is_(True))
@@ -171,6 +171,25 @@ def job_list(page=1, per_page=20, keyword=None, company=None, sort="salary_desc"
         query = query.filter(Job.experience_min == 0)
     elif exp == "experienced":
         query = query.filter(Job.experience_min > 0)
+
+    # BM25 排序：有 bm25_ids 时按 BM25 相关度顺序返回，忽略 sort 参数
+    if bm25_ids:
+        query = query.filter(Job.job_id.in_(bm25_ids))
+        total = query.count()
+        all_jobs = {j.job_id: j for j in query.all()}
+        ordered = [all_jobs[jid] for jid in bm25_ids if jid in all_jobs]
+        start = (page - 1) * per_page
+        jobs = ordered[start: start + per_page]
+        items = [{
+            "job_id": j.job_id, "title": j.title,
+            "company_name": j.company.name, "city": j.city, "area": j.area,
+            "salary": _format_salary(j), "salary_max": j.salary_max,
+            "experience": _format_experience(j), "education": j.education_req,
+            "skill_tags": json.loads(j.skill_tags) if j.skill_tags else [],
+            "url": j.url,
+            "last_seen_at": j.last_seen_at.strftime("%Y-%m-%d") if j.last_seen_at else None,
+        } for j in jobs]
+        return {"total": total, "page": page, "per_page": per_page, "sort": "bm25", "items": items}
 
     monthly_first = db.case((Job.salary_unit == "K/月", 0), else_=1)
     if sort == "salary_desc":

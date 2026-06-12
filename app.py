@@ -10,6 +10,7 @@ from flask import Response, jsonify, render_template, request, stream_with_conte
 
 import analytics
 import config
+import search as bm25
 from models import Company, Job, app, db
 
 # ── 页面路由 ──────────────────────────────────────────────
@@ -58,10 +59,18 @@ def api_job_list():
     city = request.args.get("city", "").strip() or None
     salary_min = request.args.get("salary_min", type=float)
     salary_max = request.args.get("salary_max", type=float)
+
+    # BM25 语义搜索：有关键词时用 BM25 拿到排序后的 job_id 列表，再按此顺序分页
+    bm25_ids = None
+    if keyword:
+        bm25.rebuild_index_if_needed()
+        bm25_ids = bm25.search(keyword, top_k=100)
+
     return jsonify(analytics.job_list(
         page=page, keyword=keyword, company=company,
         sort=sort, exp=exp, city=city,
         salary_min=salary_min, salary_max=salary_max,
+        bm25_ids=bm25_ids,
     ))
 
 
