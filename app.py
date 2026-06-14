@@ -329,7 +329,7 @@ def api_coverage():
     result = []
     for industry in config.CORE_INDUSTRIES:
         row = {"industry": industry, "cities": {}}
-        for city in config.CORE_CITIES.keys():
+        for city in config.CITIES.keys():  # 全部5个城市都展示，非核心城市显示locked
             pair = (city, industry)
             if pair in core_pairs or pair in done_pairs:
                 row["cities"][city] = "active"

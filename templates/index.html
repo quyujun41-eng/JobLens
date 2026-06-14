@@ -459,7 +459,7 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
             <thead>
               <tr>
                 <th>行业</th>
-                <th>深圳</th><th>北京</th><th>上海</th><th>广州</th>
+                <th>深圳</th><th>北京</th><th>上海</th><th>广州</th><th>杭州</th>
               </tr>
             </thead>
             <tbody id="coverageTbody"></tbody>
@@ -1044,7 +1044,7 @@ function appendChatMsg(role, content) {
 // ── 数据覆盖 ──────────────────────────────────────────────
 function loadCoverage() {
   fetch('/api/coverage').then(r=>r.json()).then(function(data){
-    var cities = ['深圳','北京','上海','广州'];
+    var cities = ['深圳','北京','上海','广州','杭州'];
     var covered = 0, total = 0;
     var html = '';
     data.forEach(function(row){
