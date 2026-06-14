@@ -121,27 +121,17 @@ _MATCH_SCORE_SCHEMA = {
 
 
 def match_score(resume_text: str, jd_text: str) -> dict:
-    """计算简历与JD的匹配评分（0-100），使用结构化输出确保JSON格式"""
+    """计算简历与JD的匹配评分（0-100），使用 PromptTemplate + 结构化输出"""
     if not resume_text or not jd_text:
         return {"score": 0, "reason": "简历或JD为空", "matched": []}
 
-    prompt = f"""你是一位资深HR，请评估以下简历与岗位的匹配程度。
-
-岗位描述：
-{jd_text[:2000]}
-
-求职者简历：
-{resume_text[:1500]}
-
-请用JSON格式回答（只返回JSON，不要其他内容）：
-{{
-  "score": <0-100的整数>,
-  "matched": ["已具备的关键技能/经验，最多3条，每条15字内"],
-  "reason": "一句话总结匹配情况，30字内"
-}}"""
-
+    from prompt_template import library
+    messages = library.get("match_score").to_messages(
+        jd_text=jd_text[:2000],
+        resume_text=resume_text[:1500],
+    )
     try:
-        result = _call_structured([{"role": "user", "content": prompt}], _MATCH_SCORE_SCHEMA, max_tokens=300)
+        result = _call_structured(messages, _MATCH_SCORE_SCHEMA, max_tokens=300)
         if result and "score" in result:
             return result
         raise ValueError("empty")
@@ -150,36 +140,19 @@ def match_score(resume_text: str, jd_text: str) -> dict:
 
 
 def gap_analysis_stream(resume_text: str, jd_text: str):
-    """流式输出 Gap 分析"""
+    """流式输出 Gap 分析（使用 PromptTemplate）"""
     if not resume_text or not jd_text:
         yield {"type": "text", "text": "请先在「我的简历」页面填写简历内容。"}
         yield {"type": "done"}
         return
 
-    prompt = f"""你是一位职业发展顾问，请分析求职者简历与目标岗位的差距。
-
-岗位要求：
-{jd_text[:2000]}
-
-求职者简历：
-{resume_text[:1500]}
-
-请按以下结构输出（Markdown格式）：
-
-## 已具备的优势
-列出简历中与JD匹配的技能/经验（3-5条）
-
-## 需要补充的技能
-**可快速补充（1-4周）**：通过项目实践可快速掌握的
-**需要长期积累（1-3月+）**：需要系统学习的
-
-## 建议行动计划
-具体可执行的3步建议
-
-每条不超过30字。"""
-
+    from prompt_template import library
+    messages = library.get("gap_analysis").to_messages(
+        jd_text=jd_text[:2000],
+        resume_text=resume_text[:1500],
+    )
     try:
-        for text in _stream_chunks([{"role": "user", "content": prompt}], max_tokens=800):
+        for text in _stream_chunks(messages, max_tokens=800):
             yield {"type": "text", "text": text}
         yield {"type": "done"}
     except Exception as e:
@@ -187,33 +160,20 @@ def gap_analysis_stream(resume_text: str, jd_text: str):
 
 
 def company_intel_stream(jd_text: str, company_name: str, title: str):
-    """从JD文本提取公司业务情报（流式）"""
+    """从JD文本提取公司业务情报（流式，使用 PromptTemplate）"""
     if not jd_text:
         yield {"type": "text", "text": "暂无岗位描述数据。"}
         yield {"type": "done"}
         return
 
-    prompt = f"""你是一位商业分析师，请根据以下招聘JD推断该公司的核心业务方向。
-
-公司：{company_name}  岗位：{title}
-JD：{jd_text[:2000]}
-
-请输出（Markdown格式）：
-
-## 核心业务方向
-从JD推断该团队在做什么产品/服务（2-3句）
-
-## 技术栈偏向
-提炼JD中核心技术要求，归纳方向
-
-## 岗位真实需求
-解读这个岗位实际最看重什么能力
-
-## 面试重点预判
-预测面试可能重点考察的2-3个方向"""
-
+    from prompt_template import library
+    messages = library.get("company_intel").to_messages(
+        company=company_name,
+        title=title,
+        jd_text=jd_text[:2000],
+    )
     try:
-        for text in _stream_chunks([{"role": "user", "content": prompt}], max_tokens=600):
+        for text in _stream_chunks(messages, max_tokens=600):
             yield {"type": "text", "text": text}
         yield {"type": "done"}
     except Exception as e:
@@ -221,36 +181,22 @@ JD：{jd_text[:2000]}
 
 
 def interview_prep_stream(jd_text: str, company_name: str, title: str, resume_text: str = ""):
-    """根据JD生成面试题预测和准备建议（流式）"""
+    """根据JD生成面试题预测和准备建议（流式，使用 PromptTemplate）"""
     if not jd_text:
         yield {"type": "text", "text": "暂无岗位描述数据。"}
         yield {"type": "done"}
         return
 
+    from prompt_template import library
     resume_section = f"\n\n求职者简历：\n{resume_text[:1000]}" if resume_text else ""
-    prompt = f"""你是一位资深面试官，请根据以下岗位信息生成面试准备材料。
-
-公司：{company_name}  岗位：{title}
-JD要求：{jd_text[:2000]}{resume_section}
-
-请输出（Markdown格式）：
-
-## 核心考察方向（3-5个）
-列出该岗位面试最看重的技能/能力方向
-
-## 预测面试题
-
-**技术题（5题）**
-1. ...
-
-**场景/行为题（3题）**
-1. ...
-
-## 重点备考提示
-针对这个岗位的1-2条具体备考建议"""
-
+    messages = library.get("interview_prep").to_messages(
+        company=company_name,
+        title=title,
+        jd_text=jd_text[:2000],
+        resume_section=resume_section,
+    )
     try:
-        for text in _stream_chunks([{"role": "user", "content": prompt}], max_tokens=1000):
+        for text in _stream_chunks(messages, max_tokens=1000):
             yield {"type": "text", "text": text}
         yield {"type": "done"}
     except Exception as e:

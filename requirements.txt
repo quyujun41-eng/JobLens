@@ -11,3 +11,6 @@ numpy
 mcp
 chromadb
 faster-whisper
+edge-tts
+# 可选：sentence-transformers（本地Embedding，首次下载~400MB）
+# sentence-transformers

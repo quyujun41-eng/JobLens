@@ -20,28 +20,18 @@ _PASS_THRESHOLD = 7
 
 
 def evaluate_output(question: str, answer: str) -> dict:
-    """Evaluator：对 Agent 输出打质量分，返回 {score, passed, feedback}"""
+    """Evaluator：对 Agent 输出打质量分（使用 PromptTemplate），返回 {score, passed, feedback}"""
     if not answer.strip():
         return {"score": 0, "passed": False, "feedback": "回答为空"}
 
-    prompt = f"""你是输出质量评审专家，评估AI助手的求职分析回答质量。
-
-用户问题：{question}
-
-AI回答：
-{answer[:1500]}
-
-评估维度（各2.5分）：
-1. 数据真实性：使用真实数据而非编造
-2. 问题针对性：直接回答了用户问题
-3. 建议可行性：提供了具体可执行建议
-4. 表达简洁性：不冗余，重点突出
-
-只返回JSON：{{"score": 整数0-10, "passed": true/false, "feedback": "改进建议"}}"""
-
+    from prompt_template import library
+    messages = library.get("evaluator").to_messages(
+        question=question,
+        answer=answer[:1500],
+    )
     try:
         from ai_features import _call_structured
-        result = _call_structured([{"role": "user", "content": prompt}], _EVAL_SCHEMA, max_tokens=150)
+        result = _call_structured(messages, _EVAL_SCHEMA, max_tokens=150)
         if result and "score" in result:
             result["passed"] = result["score"] >= _PASS_THRESHOLD
             return result

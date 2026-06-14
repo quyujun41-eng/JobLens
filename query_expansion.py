@@ -21,19 +21,12 @@ def expand_query(query: str, n: int = 3) -> list:
     if cache_key in _expansion_cache:
         return _expansion_cache[cache_key]
 
-    prompt = f"""你是一个搜索引擎优化专家。用户在招聘网站搜索：「{query}」
-
-请生成 {n} 个语义等价或高度相关的搜索变体，用于提升召回率。
-要求：
-1. 涵盖同义词、缩写、相关技术词
-2. 适合中文招聘场景
-3. 每个变体 5-15 字
-
-只返回 JSON 数组（不要解释）：["变体1", "变体2", "变体3"]"""
+    from prompt_template import library
+    messages = library.get("query_expansion").to_messages(query=query, n=n)
 
     try:
         from ai_features import _call_once
-        resp = _call_once([{"role": "user", "content": prompt}], max_tokens=150)
+        resp = _call_once(messages, max_tokens=150)
         start = resp.find("[")
         end = resp.rfind("]") + 1
         variants = json.loads(resp[start:end])

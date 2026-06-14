@@ -290,6 +290,71 @@ async def _run_stdio():
         )
 
 
+async def _run_streamable_http(host: str = "0.0.0.0", port: int = 8767):
+    """Streamable HTTP 传输：单一 POST /mcp 端点，同时支持 JSON 和 SSE 响应
+    客户端通过 Accept 头选择响应格式：
+      Accept: application/json        → 普通 JSON-RPC 响应
+      Accept: text/event-stream       → SSE 流式响应（适合长工具调用）
+    """
+    try:
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        from starlette.requests import Request
+        from starlette.responses import JSONResponse, StreamingResponse
+        import uvicorn
+
+        async def handle_mcp_post(request: Request):
+            body = await request.json()
+            accept = request.headers.get("accept", "application/json")
+
+            method = body.get("method", "")
+            params = body.get("params", {})
+            req_id = body.get("id", 1)
+
+            # 路由到对应处理器
+            if method == "initialize":
+                result = {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "joblens", "version": "1.0.0"},
+                }
+            elif method == "tools/list":
+                tool_list = await list_tools()
+                result = {"tools": [
+                    {"name": t.name, "description": t.description,
+                     "inputSchema": t.inputSchema}
+                    for t in tool_list
+                ]}
+            elif method == "tools/call":
+                tool_name = params.get("name", "")
+                arguments = params.get("arguments", {})
+                content = await call_tool(tool_name, arguments)
+                result = {"content": [{"type": "text", "text": c.text} for c in content]}
+            else:
+                result = {"error": f"未知方法: {method}"}
+
+            response_body = {"jsonrpc": "2.0", "id": req_id, "result": result}
+
+            if "event-stream" in accept:
+                # SSE 格式响应
+                async def sse_gen():
+                    yield f"data: {json.dumps(response_body, ensure_ascii=False)}\n\n"
+                return StreamingResponse(sse_gen(), media_type="text/event-stream",
+                                         headers={"Cache-Control": "no-cache"})
+            else:
+                return JSONResponse(response_body)
+
+        starlette_app = Starlette(routes=[
+            Route("/mcp", endpoint=handle_mcp_post, methods=["POST"]),
+            Route("/mcp/health", endpoint=lambda r: JSONResponse({"status": "ok", "server": "joblens"})),
+        ])
+        print(f"[MCP Streamable HTTP] 启动于 http://{host}:{port}/mcp")
+        cfg = uvicorn.Config(starlette_app, host=host, port=port, log_level="warning")
+        await uvicorn.Server(cfg).serve()
+    except ImportError as e:
+        print(f"[MCP Streamable HTTP] 缺少依赖 ({e})，请安装: pip install uvicorn starlette")
+
+
 async def _run_sse(host: str = "0.0.0.0", port: int = 8765):
     """SSE 传输：通过 HTTP 暴露 MCP Server，供 Web 客户端或远程调用使用
     端点：GET /sse  —— 建立 SSE 连接
@@ -328,12 +393,15 @@ async def main():
     """默认以 stdio 模式启动；--sse 参数启动 SSE 模式"""
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sse", action="store_true", help="以 SSE HTTP 模式启动")
-    parser.add_argument("--port", type=int, default=8765, help="SSE 端口（默认 8765）")
+    parser.add_argument("--sse",  action="store_true", help="以 SSE HTTP 模式启动（端口 8765）")
+    parser.add_argument("--http", action="store_true", help="以 Streamable HTTP 模式启动（端口 8767）")
+    parser.add_argument("--port", type=int, default=8765, help="HTTP/SSE 端口")
     args = parser.parse_args()
 
     if args.sse:
         await _run_sse(port=args.port)
+    elif args.http:
+        await _run_streamable_http(port=args.port)
     else:
         await _run_stdio()
 

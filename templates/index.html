@@ -551,6 +551,23 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
         </div>
         <div id="ragEvalResult" style="font-size:13px;color:#556;"></div>
       </div>
+      <div class="card" style="margin-top:16px;">
+        <div class="section-title">文档分块预览</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+          <select id="chunkStrategy" style="padding:7px 10px;border:1.5px solid #e0e6ef;border-radius:8px;font-size:13px;">
+            <option value="chinese">中文专属</option>
+            <option value="recursive">递归分隔符</option>
+            <option value="fixed">固定大小</option>
+          </select>
+          <button onclick="runChunkPreview()" style="padding:7px 14px;background:#4facfe;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;">分块</button>
+        </div>
+        <textarea id="chunkInput" placeholder="粘贴任意文本，预览分块效果..." rows="4" style="width:100%;padding:8px;border:1.5px solid #e0e6ef;border-radius:8px;font-size:13px;resize:vertical;outline:none;"></textarea>
+        <div id="chunkResult" style="font-size:12px;color:#556;margin-top:10px;"></div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <div class="section-title">PromptTemplate 库</div>
+        <div id="promptTemplateList" style="font-size:13px;"></div>
+      </div>
     </div>
 
   </div><!-- /content -->
@@ -1236,10 +1253,36 @@ function appendChatMsg(role, content) {
   var box = document.getElementById('chatBox');
   var div = document.createElement('div');
   div.className = 'chat-msg '+role;
-  div.innerHTML = '<div class="chat-label">'+(role==='user'?'你':'AI 助手')+'</div>'
+  var ttsBtn = role === 'bot'
+    ? '<button onclick="speakText(this)" title="朗读" style="border:none;background:transparent;cursor:pointer;font-size:13px;opacity:.5;margin-left:6px;">🔊</button>'
+    : '';
+  div.innerHTML = '<div class="chat-label">'+(role==='user'?'你':'AI 助手')+ttsBtn+'</div>'
     + '<div class="chat-bubble">'+content+'</div>';
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
+}
+
+function speakText(btn) {
+  var bubble = btn.closest('.chat-msg').querySelector('.chat-bubble');
+  if (!bubble) return;
+  var text = (bubble.innerText || bubble.textContent || '').trim().slice(0, 400);
+  if (!text) return;
+  btn.textContent = '⏳';
+  fetch('/api/text_to_speech', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text: text, voice: 'zh-CN-XiaoxiaoNeural'})
+  }).then(function(r) {
+    if (!r.ok) { btn.textContent = '🔊'; return; }
+    return r.blob();
+  }).then(function(blob) {
+    if (!blob) return;
+    var url = URL.createObjectURL(blob);
+    var audio = new Audio(url);
+    btn.textContent = '🔉';
+    audio.play();
+    audio.onended = function() { btn.textContent = '🔊'; URL.revokeObjectURL(url); };
+  }).catch(function() { btn.textContent = '🔊'; });
 }
 
 // ── 数据覆盖 ──────────────────────────────────────────────
@@ -1331,6 +1374,7 @@ function toggleVoice() {
 
 // ── 用量监控 ──────────────────────────────────────────────
 function loadObservability() {
+  loadPromptTemplates();
   fetch('/api/usage_stats').then(function(r){return r.json();}).then(function(d){
     document.getElementById('obs-total').textContent = d.total_requests || 0;
     document.getElementById('obs-latency').textContent = d.avg_latency_ms || 0;
@@ -1346,6 +1390,42 @@ function loadObservability() {
     });
     document.getElementById('obsEndpointTbody').innerHTML = html || '<tr><td colspan="4" style="color:#aab;padding:20px;text-align:center;">暂无数据</td></tr>';
   });
+}
+
+// ── 文档分块 ──────────────────────────────────────────────
+function runChunkPreview() {
+  var text = document.getElementById('chunkInput').value.trim();
+  var strategy = document.getElementById('chunkStrategy').value;
+  if (!text) { showToast('请输入文本', 1500); return; }
+  var el = document.getElementById('chunkResult');
+  el.textContent = '分块中...';
+  fetch('/api/chunk_preview', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text: text, strategy: strategy})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { el.textContent = '错误：' + d.error; return; }
+    var html = '<div style="margin-bottom:8px;color:#aab;">共 <strong style="color:#4facfe;">' + d.total_chunks + '</strong> 块，均长 ' + d.avg_chunk_size + ' 字，策略：' + d.strategy + '</div>';
+    d.chunks.forEach(function(c, i){
+      html += '<div style="margin-bottom:8px;padding:8px 12px;background:#f8faff;border-left:3px solid #4facfe;border-radius:4px;">'
+        + '<div style="font-size:11px;color:#aab;margin-bottom:4px;">块 #' + c.metadata.chunk_index + ' · ' + c.metadata.char_length + '字</div>'
+        + '<div style="font-size:12px;color:#334;">' + escHtml(c.content.slice(0, 150)) + (c.content.length > 150 ? '...' : '') + '</div></div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){ el.textContent = '请求失败'; });
+}
+
+// ── PromptTemplate 库 ──────────────────────────────────────
+function loadPromptTemplates() {
+  fetch('/api/prompt_templates').then(function(r){return r.json();}).then(function(d){
+    var html = '<div style="color:#aab;font-size:12px;margin-bottom:8px;">共 ' + d.total + ' 个模板</div>';
+    (d.templates||[]).forEach(function(t){
+      html += '<div style="padding:8px 0;border-bottom:1px solid #f5f7fa;">'
+        + '<span style="font-weight:600;color:#4facfe;">' + escHtml(t.name) + '</span>'
+        + '<span style="font-size:11px;color:#aab;margin-left:8px;">变量：' + escHtml(t.variables.join(', ')) + '</span>'
+        + '</div>';
+    });
+    document.getElementById('promptTemplateList').innerHTML = html;
+  }).catch(function(){});
 }
 
 // ── RAG 评估 ──────────────────────────────────────────────

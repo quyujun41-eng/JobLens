@@ -1,30 +1,30 @@
 # !/usr/bin/env python
 # _*_ coding: utf-8 _*_
-"""向量检索：ChromaDB持久化 + TF-IDF自定义嵌入 + BM25混合RRF融合
-ChromaDB提供持久化存储（重启无需重建索引），TF-IDF替代大模型embedding（无需下载）"""
+"""向量检索：ChromaDB持久化 + EmbeddingProvider 抽象（TF-IDF/OpenAI/SentenceTransformers）
++ BM25混合RRF融合。切换 EMBED_PROVIDER 环境变量即可更换嵌入后端。"""
 
 import json
 import os
-import re
 
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 import config
-
-# ── TF-IDF 组件（ChromaDB 的自定义 embedding function 依赖它）────────────
-
-_vectorizer: TfidfVectorizer = None
-_matrix = None
-_job_ids: list = []
-_indexed_count: int = -1
+from embedding import EmbeddingProvider, get_embedding_provider
 
 _CHROMA_DIR = os.path.join(config.DATA_DIR, "chroma_db")
 
+# in-memory 回退索引
+_provider: EmbeddingProvider = None
+_corpus_matrix = None
+_job_ids: list = []
+_indexed_count: int = -1
+
+
+import re
+
 
 def _preprocess(text: str) -> str:
-    """分词：中文逐字切分，英文/数字保留，转小写"""
+    """分词预处理：中文逐字、英文小写（TF-IDF 使用）"""
     if not text:
         return ""
     tokens = re.findall(r'[一-鿿]+|[A-Za-z][A-Za-z0-9]*|\d+', text)
@@ -54,7 +54,7 @@ _chroma_collection = None
 
 
 def _get_chroma_collection():
-    """懒加载 ChromaDB collection，使用自定义 TF-IDF embedding"""
+    """懒加载 ChromaDB collection，使用 EmbeddingProvider 作为 embedding function"""
     global _chroma_collection
     if _chroma_collection is not None:
         return _chroma_collection
@@ -63,26 +63,28 @@ def _get_chroma_collection():
         import chromadb
         from chromadb import EmbeddingFunction, Documents, Embeddings
 
-        class TfidfEmbedding(EmbeddingFunction):
-            """把 TF-IDF 向量适配为 ChromaDB 的 EmbeddingFunction 接口"""
+        class ProviderEmbedding(EmbeddingFunction):
+            """将 EmbeddingProvider 适配为 ChromaDB EmbeddingFunction 接口"""
             def __call__(self, input: Documents) -> Embeddings:
                 rebuild_if_needed()
-                if _vectorizer is None:
-                    dim = 8000
-                    return [np.zeros(dim).tolist() for _ in input]
-                vecs = _vectorizer.transform([_preprocess(t) for t in input])
-                return vecs.toarray().tolist()
+                ep = get_embedding_provider()
+                if ep.provider == "tfidf" and ep._tfidf is None:
+                    return [np.zeros(8000).tolist() for _ in input]
+                preprocessed = [_preprocess(t) for t in input]
+                vecs = ep.embed(preprocessed)
+                return [v.tolist() for v in vecs]
 
         os.makedirs(_CHROMA_DIR, exist_ok=True)
         client = chromadb.PersistentClient(path=_CHROMA_DIR)
         _chroma_collection = client.get_or_create_collection(
             name="jobs",
-            embedding_function=TfidfEmbedding(),
+            embedding_function=ProviderEmbedding(),
             metadata={"hnsw:space": "cosine"},
         )
-        print(f"[ChromaDB] 已连接，路径={_CHROMA_DIR}，文档数={_chroma_collection.count()}")
+        print(f"[ChromaDB] 已连接，路径={_CHROMA_DIR}，文档数={_chroma_collection.count()}"
+              f"，Embedding={get_embedding_provider().provider_name}")
     except Exception as e:
-        print(f"[ChromaDB] 初始化失败，降级为 in-memory TF-IDF: {e}")
+        print(f"[ChromaDB] 初始化失败，降级为 in-memory: {e}")
         _chroma_collection = None
 
     return _chroma_collection
@@ -132,30 +134,29 @@ def chroma_search(query: str, top_k: int = 50, where: dict = None) -> list:
 # ── TF-IDF 后端（fallback）──────────────────────────────────────────────
 
 def build_index():
-    """从数据库全量重建 TF-IDF 索引，并同步到 ChromaDB"""
-    global _vectorizer, _matrix, _job_ids, _indexed_count
+    """全量重建向量索引（EmbeddingProvider 支持的任意后端），并同步到 ChromaDB"""
+    global _provider, _corpus_matrix, _job_ids, _indexed_count
     from models import Job, app
     with app.app_context():
         jobs = Job.query.filter_by(is_active=True).all()
         _indexed_count = len(jobs)
         if not jobs:
-            _vectorizer = None
-            _matrix = None
+            _provider = None
+            _corpus_matrix = None
             _job_ids = []
             return
 
-        corpus, ids = [], []
-        for j in jobs:
-            corpus.append(_preprocess(_build_doc(j)))
-            ids.append(j.job_id)
+        corpus = [_preprocess(_build_doc(j)) for j in jobs]
+        _job_ids = [j.job_id for j in jobs]
 
-        _job_ids = ids
-        _vectorizer = TfidfVectorizer(max_features=8000, min_df=1, sublinear_tf=True)
-        _matrix = _vectorizer.fit_transform(corpus)
+        _provider = get_embedding_provider()
+        _provider.fit(corpus)              # TF-IDF 需要 fit，其他后端 no-op
+        _corpus_matrix = _provider.embed(corpus)
 
         _sync_chroma(jobs)
 
-    print(f"[向量索引] TF-IDF 已建立 {_indexed_count} 个岗位，ChromaDB 已同步")
+    print(f"[向量索引] 已建立 {_indexed_count} 个岗位"
+          f"，Embedding={_provider.provider_name}，ChromaDB 已同步")
 
 
 def rebuild_if_needed():
@@ -163,7 +164,7 @@ def rebuild_if_needed():
     from models import Job, app
     with app.app_context():
         current = Job.query.filter_by(is_active=True).count()
-    if current != _indexed_count or _vectorizer is None:
+    if current != _indexed_count or _provider is None:
         build_index()
 
 
@@ -183,12 +184,12 @@ def vector_search(query: str, top_k: int = 50, city: str = None, industry: str =
             where = {"$and": [{k: v} for k, v in filters.items()]}
         return chroma_search(query, top_k, where=where)
 
-    # fallback: TF-IDF in-memory
+    # fallback: in-memory EmbeddingProvider
     rebuild_if_needed()
-    if _vectorizer is None or _matrix is None or not _job_ids:
+    if _provider is None or _corpus_matrix is None or not _job_ids:
         return []
-    q_vec = _vectorizer.transform([_preprocess(query)])
-    sims = cosine_similarity(q_vec, _matrix)[0]
+    q_vec = _provider.embed_single(_preprocess(query))
+    sims = _provider.similarity(q_vec, _corpus_matrix)
     top_idx = np.argsort(sims)[::-1][:top_k]
     return [(_job_ids[i], float(sims[i])) for i in top_idx if sims[i] > 0]
 

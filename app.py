@@ -580,6 +580,75 @@ def api_rag_eval():
     })
 
 
+@app.route("/api/text_to_speech", methods=["POST"])
+def api_text_to_speech():
+    """文字转语音（TTS）：用 edge-tts 将文本合成为 MP3 音频流
+    支持多种中文声音：zh-CN-XiaoxiaoNeural / zh-CN-YunxiNeural 等"""
+    body = request.get_json(silent=True) or {}
+    text = body.get("text", "").strip()[:500]
+    voice = body.get("voice", "zh-CN-XiaoxiaoNeural")
+    if not text:
+        return jsonify({"error": "请提供文本"}), 400
+    try:
+        import asyncio
+        import io
+        import edge_tts
+
+        async def _synthesize():
+            communicate = edge_tts.Communicate(text, voice)
+            buf = io.BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    buf.write(chunk["data"])
+            buf.seek(0)
+            return buf.read()
+
+        audio_data = asyncio.run(_synthesize())
+        return Response(
+            audio_data,
+            mimetype="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=tts.mp3"},
+        )
+    except ImportError:
+        return jsonify({"error": "请安装 edge-tts: pip install edge-tts"}), 500
+    except Exception as e:
+        return jsonify({"error": f"TTS 失败: {e}"}), 500
+
+
+@app.route("/api/chunk_preview", methods=["POST"])
+def api_chunk_preview():
+    """文档分块预览：对输入文本按指定策略分块，返回分块结果和统计"""
+    from doc_chunker import chunk_with_metadata
+    body = request.get_json(silent=True) or {}
+    text = body.get("text", "").strip()
+    strategy = body.get("strategy", "chinese")
+    chunk_size = body.get("chunk_size", 500)
+    overlap = body.get("overlap", 50)
+    if not text:
+        return jsonify({"error": "请提供文本"}), 400
+    if len(text) > 50000:
+        return jsonify({"error": "文本过长，最多 50000 字"}), 400
+    try:
+        chunks = chunk_with_metadata(text, source="preview", strategy=strategy,
+                                      chunk_size=chunk_size if strategy != "chinese" else 500,
+                                      overlap=overlap if strategy != "chinese" else 50)
+        return jsonify({
+            "strategy": strategy,
+            "total_chunks": len(chunks),
+            "avg_chunk_size": round(sum(len(c["content"]) for c in chunks) / max(len(chunks), 1)),
+            "chunks": chunks[:20],  # 最多返回 20 块预览
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/prompt_templates")
+def api_prompt_templates():
+    """列出所有已注册的 PromptTemplate"""
+    from prompt_template import library
+    return jsonify({"total": len(library), "templates": library.list_templates()})
+
+
 @app.route("/api/connector/tools")
 def api_connector_tools():
     """列出 Connector 中注册的所有工具（来源：local / mcp / external）"""
