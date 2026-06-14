@@ -1,8 +1,10 @@
 # !/usr/bin/env python
 # _*_ coding: utf-8 _*_
-"""Function Calling Agent：Router分流 + 并行工具调用 + SummaryMemory对话压缩"""
+"""Function Calling Agent：Router分流 + 并行工具调用 + SummaryMemory + TokenWindow"""
 
 import json
+import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import config
@@ -75,6 +77,55 @@ TOOLS = [
         },
     },
 ]
+
+
+# ── TokenWindow：滑动窗口记忆 ───────────────────────────────────────────
+
+_TOKEN_WINDOW_LIMIT = 3000  # 历史上下文 token 预算
+
+
+def _count_tokens(text: str) -> int:
+    chinese = len(re.findall(r'[一-鿿]', text))
+    english = len(re.findall(r'[A-Za-z]+', text))
+    return int(chinese * 1.5 + english * 1.3)
+
+
+def apply_token_window(history: list, max_tokens: int = _TOKEN_WINDOW_LIMIT) -> list:
+    """从最新消息往前累计 token，超出预算则截断旧消息"""
+    if not history:
+        return []
+    total, result = 0, []
+    for msg in reversed(history):
+        t = _count_tokens(msg.get("content", ""))
+        if total + t > max_tokens and result:
+            break
+        result.insert(0, msg)
+        total += t
+    return result
+
+
+# ── 工具缓存 ─────────────────────────────────────────────────────────────
+
+_tool_cache: dict = {}
+_CACHE_TTL = 300  # 5分钟缓存
+
+
+def _cached_execute_tool(name: str, inp: dict, resume: str = "") -> str:
+    """带缓存和超时的工具执行（只缓存无副作用的查询类工具）"""
+    cacheable = {"search_jobs", "get_job_detail", "get_market_stats"}
+    cache_key = f"{name}:{json.dumps(inp, sort_keys=True)}"
+
+    if name in cacheable:
+        entry = _tool_cache.get(cache_key)
+        if entry and (time.time() - entry["ts"] < _CACHE_TTL):
+            return entry["result"]
+
+    result = _execute_tool(name, inp, resume)
+
+    if name in cacheable:
+        _tool_cache[cache_key] = {"result": result, "ts": time.time()}
+
+    return result
 
 
 # ── Router：意图分类 ─────────────────────────────────────────────────────
@@ -233,35 +284,39 @@ def _execute_tool(name: str, inp: dict, resume: str = "") -> str:
 
 # ── 并行工具执行 ─────────────────────────────────────────────────────────
 
+_TOOL_TIMEOUT = 15  # 单个工具调用超时秒数
+
+
 def _execute_tools_parallel(tool_blocks, resume: str) -> dict:
-    """用 ThreadPoolExecutor 并行执行多个工具调用，返回 {tool_use_id: result}"""
+    """并行执行多个工具调用（带缓存+超时），返回 {tool_use_id: result}"""
     results = {}
     with ThreadPoolExecutor(max_workers=len(tool_blocks)) as pool:
         futures = {
-            pool.submit(_execute_tool, b.name, b.input, resume): b
+            pool.submit(_cached_execute_tool, b.name, b.input, resume): b
             for b in tool_blocks
         }
-        for future in as_completed(futures):
+        for future in as_completed(futures, timeout=_TOOL_TIMEOUT + 5):
             b = futures[future]
             try:
-                results[b.id] = future.result()
+                results[b.id] = future.result(timeout=_TOOL_TIMEOUT)
             except Exception as e:
                 results[b.id] = f"工具执行出错: {e}"
     return results
 
 
 def _execute_oai_tools_parallel(tool_calls, resume: str) -> dict:
-    """OpenAI 格式的并行工具执行，返回 {tool_call_id: result}"""
+    """OpenAI 格式并行工具执行（带缓存+超时），返回 {tool_call_id: result}"""
     results = {}
     with ThreadPoolExecutor(max_workers=len(tool_calls)) as pool:
         futures = {
-            pool.submit(_execute_tool, tc.function.name, json.loads(tc.function.arguments), resume): tc
+            pool.submit(_cached_execute_tool, tc.function.name,
+                        json.loads(tc.function.arguments), resume): tc
             for tc in tool_calls
         }
-        for future in as_completed(futures):
+        for future in as_completed(futures, timeout=_TOOL_TIMEOUT + 5):
             tc = futures[future]
             try:
-                results[tc.id] = future.result()
+                results[tc.id] = future.result(timeout=_TOOL_TIMEOUT)
             except Exception as e:
                 results[tc.id] = f"工具执行出错: {e}"
     return results
@@ -283,11 +338,14 @@ def agent_stream(question: str, history: list, resume: str = "", session_id: str
         "4. 回答简洁专业，用数据支撑观点，重点加粗"
     )
 
-    # SummaryMemory：压缩过长历史
+    # SummaryMemory：消息数过多时压缩旧历史
     if session_id and len(history) > _SUMMARY_THRESHOLD:
         history = _maybe_summarize(session_id, history)
 
-    messages = [{"role": h["role"], "content": h["content"]} for h in history[-8:]]
+    # TokenWindow：在 SummaryMemory 之后再做 token 预算裁剪
+    history = apply_token_window(history)
+
+    messages = [{"role": h["role"], "content": h["content"]} for h in history]
     messages.append({"role": "user", "content": question})
 
     yield {"type": "intent", "intent": intent}

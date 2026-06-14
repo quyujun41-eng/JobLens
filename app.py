@@ -271,6 +271,7 @@ def api_ask():
     question = body.get("question", "").strip()
     session_id = body.get("session_id", "").strip() or None
     resume = body.get("resume", "").strip()
+    mode = body.get("mode", "standard")  # standard | evaluator | orchestrator
     if not question:
         return jsonify({"error": "请输入问题"}), 400
 
@@ -292,13 +293,22 @@ def api_ask():
             ChatMessage.created_at).all()
         history = [{"role": m.role, "content": m.content} for m in all_msgs[:-1]]
 
-    from agent import agent_stream
+    if mode == "evaluator":
+        from evaluator_optimizer import evaluator_optimizer_stream as _stream_fn
+        _gen_args = (question, history, resume, session_id)
+    elif mode == "orchestrator":
+        from orchestrator import orchestrate_stream as _stream_fn
+        _gen_args = (question, history, resume)
+    else:
+        from agent import agent_stream as _stream_fn
+        _gen_args = (question, history, resume)
+
     accumulated_text = []
     accumulated_tools = []
 
     def generate():
         try:
-            for chunk in agent_stream(question, history, resume, session_id=session_id):
+            for chunk in _stream_fn(*_gen_args):
                 if chunk.get("type") == "text":
                     accumulated_text.append(chunk["text"])
                 elif chunk.get("type") in ("tool_call", "tool_result"):
@@ -568,6 +578,30 @@ def api_rag_eval():
             "ids": hybrid_ids[:5],
         },
     })
+
+
+@app.route("/api/connector/tools")
+def api_connector_tools():
+    """列出 Connector 中注册的所有工具（来源：local / mcp / external）"""
+    from connector import get_connector
+    c = get_connector()
+    return jsonify({"total": len(c), "tools": c.list_tool_info()})
+
+
+@app.route("/api/connector/call", methods=["POST"])
+def api_connector_call():
+    """通过 Connector 调用任意工具（统一入口，屏蔽来源差异）"""
+    from connector import get_connector
+    body = request.get_json(silent=True) or {}
+    name = body.get("tool", "").strip()
+    arguments = body.get("arguments", {})
+    if not name:
+        return jsonify({"error": "缺少 tool 参数"}), 400
+    c = get_connector()
+    if name not in c:
+        return jsonify({"error": f"工具 {name!r} 不存在", "available": c.list_tool_info()}), 404
+    result = c.call(name, arguments)
+    return jsonify({"tool": name, "source": c.get_source(name), "result": result})
 
 
 @app.errorhandler(Exception)

@@ -106,16 +106,21 @@ def _sync_chroma(jobs):
         print(f"[ChromaDB] upsert 失败: {e}")
 
 
-def chroma_search(query: str, top_k: int = 50) -> list:
-    """ChromaDB 向量检索，返回 [(job_id, score), ...]"""
+def chroma_search(query: str, top_k: int = 50, where: dict = None) -> list:
+    """ChromaDB 向量检索，支持元数据过滤，返回 [(job_id, score), ...]
+    where 示例: {"city": "深圳"} 或 {"$and": [{"city": "深圳"}, {"title": "算法"}]}
+    """
     col = _get_chroma_collection()
     if col is None or col.count() == 0:
         return []
     try:
-        results = col.query(
-            query_texts=[_preprocess(query)],
-            n_results=min(top_k, col.count()),
-        )
+        kwargs = {
+            "query_texts": [_preprocess(query)],
+            "n_results": min(top_k, col.count()),
+        }
+        if where:
+            kwargs["where"] = where
+        results = col.query(**kwargs)
         ids = results["ids"][0]
         distances = results["distances"][0]
         return [(jid, 1.0 - dist) for jid, dist in zip(ids, distances)]
@@ -162,11 +167,21 @@ def rebuild_if_needed():
         build_index()
 
 
-def vector_search(query: str, top_k: int = 50) -> list:
-    """向量语义搜索：优先用 ChromaDB，降级为 TF-IDF in-memory"""
+def vector_search(query: str, top_k: int = 50, city: str = None, industry: str = None) -> list:
+    """向量语义搜索：优先用 ChromaDB（支持元数据过滤），降级为 TF-IDF in-memory
+    city / industry 参数用于元数据过滤（仅 ChromaDB 后端支持）
+    """
     col = _get_chroma_collection()
     if col is not None and col.count() > 0:
-        return chroma_search(query, top_k)
+        where = None
+        filters = {}
+        if city:
+            filters["city"] = city
+        if len(filters) == 1:
+            where = filters
+        elif len(filters) > 1:
+            where = {"$and": [{k: v} for k, v in filters.items()]}
+        return chroma_search(query, top_k, where=where)
 
     # fallback: TF-IDF in-memory
     rebuild_if_needed()

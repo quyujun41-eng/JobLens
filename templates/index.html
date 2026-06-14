@@ -170,6 +170,13 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
 .voice-btn:hover { border-color: #4facfe; background: #f0f8ff; }
 .voice-btn.recording { background: #fee2e2; border-color: #f87171; animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
+/* 模式选择器 */
+.mode-bar { display: flex; gap: 6px; padding: 8px 14px 0; }
+.mode-btn { padding: 4px 12px; border: 1.5px solid #e0e6ef; border-radius: 12px; font-size: 11px; cursor: pointer; background: #fff; color: #778; transition: all .15s; }
+.mode-btn.active { border-color: #4facfe; color: #4facfe; background: #f0f8ff; font-weight: 600; }
+/* Worker / Eval 事件气泡 */
+.worker-bubble { display: flex; align-items: center; gap: 8px; padding: 5px 12px; background: #f0f4ff; border: 1px solid #c7d2fe; border-radius: 8px; font-size: 12px; color: #4338ca; margin: 3px 0; }
+.eval-bubble { display: flex; align-items: center; gap: 8px; padding: 5px 12px; background: #fdf4ff; border: 1px solid #e9d5ff; border-radius: 8px; font-size: 12px; color: #7c3aed; margin: 3px 0; }
 /* 工具调用气泡 */
 .tool-call-bubble { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; font-size: 12px; color: #92400e; margin: 4px 0; }
 .tool-result-bubble { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 12px; color: #166534; margin: 4px 0; }
@@ -468,6 +475,12 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
               <div class="chat-bubble">你好！我是 JobLens AI 助手，已接入岗位数据库。可以帮你：搜岗位、算匹配分、分析市场行情、生成面试题。</div>
             </div>
           </div>
+          <div class="mode-bar">
+            <span style="font-size:11px;color:#aab;line-height:26px;margin-right:4px;">模式：</span>
+            <button class="mode-btn active" id="mode-standard" onclick="setMode('standard',this)">⚡ 标准</button>
+            <button class="mode-btn" id="mode-evaluator" onclick="setMode('evaluator',this)">🔁 评估优化</button>
+            <button class="mode-btn" id="mode-orchestrator" onclick="setMode('orchestrator',this)">🧩 编排工人</button>
+          </div>
           <div class="chat-input-row">
             <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()" title="语音输入">🎤</button>
             <input class="chat-input" id="chatInput" placeholder="问我任何关于求职的问题..." onkeydown="if(event.key==='Enter')sendChat()"/>
@@ -577,6 +590,13 @@ var jobSort = 'salary_desc';
 var jobPage = 1;
 var currentJobId = null;
 var chatHistory = [];
+var _chatMode = 'standard';
+
+function setMode(mode, el) {
+  _chatMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(function(b){b.classList.remove('active');});
+  if(el) el.classList.add('active');
+}
 
 // ── 工具函数 ──────────────────────────────────────────────
 function showToast(msg, duration) {
@@ -1116,7 +1136,7 @@ function sendChat() {
   var resume = localStorage.getItem('joblens_resume') || '';
 
   fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({question:q, session_id:_currentSessionId, resume:resume})
+    body:JSON.stringify({question:q, session_id:_currentSessionId, resume:resume, mode:_chatMode})
   }).then(function(resp){
     var reader = resp.body.getReader();
     var decoder = new TextDecoder();
@@ -1134,7 +1154,29 @@ function sendChat() {
             if(chunk.session_id && !_currentSessionId) _currentSessionId = chunk.session_id;
 
             if(chunk.type==='intent') {
-              // 意图分类结果，静默处理（可用于路由日志）
+              // Router意图分类，静默
+            } else if(chunk.type==='eval_round') {
+              appendChatMsg('bot','<div class="eval-bubble">🔁 第 '+chunk.round+'/'+chunk.max+' 轮生成...</div>');
+            } else if(chunk.type==='eval_score') {
+              var icon = chunk.passed ? '✅' : '⚠️';
+              var el=document.getElementById(thinkId);
+              if(el) el.closest('.chat-msg').remove();
+              appendChatMsg('bot','<div class="eval-bubble">'+icon+' 评分 '+chunk.score+'/10'+(chunk.feedback ? ' · '+escHtml(chunk.feedback) : '')+'</div>');
+            } else if(chunk.type==='eval_done') {
+              // 评估完成，静默
+            } else if(chunk.type==='orchestrate_tasks') {
+              if(chunk.tasks && chunk.tasks.length){
+                var names = chunk.tasks.map(function(t){return t.worker.replace('_worker','');}).join(' · ');
+                appendChatMsg('bot','<div class="worker-bubble">🧩 分解任务 → <strong>'+escHtml(names)+'</strong></div>');
+              }
+            } else if(chunk.type==='worker_done') {
+              var el=document.getElementById(thinkId);
+              if(el) el.closest('.chat-msg').remove();
+              appendChatMsg('bot','<div class="worker-bubble">✅ <strong>'+escHtml(chunk.worker.replace('_worker',''))+'</strong> 完成：'+escHtml((chunk.preview||'').slice(0,80))+'...</div>');
+            } else if(chunk.type==='worker_error') {
+              appendChatMsg('bot','<div class="worker-bubble" style="border-color:#fca5a5;background:#fff1f2;color:#dc2626;">❌ '+escHtml(chunk.worker)+' 失败</div>');
+            } else if(chunk.type==='orchestrate_synth') {
+              appendChatMsg('bot','<div class="worker-bubble">📝 综合各Worker结果...</div>');
             } else if(chunk.type==='tool_call') {
               var el=document.getElementById(thinkId);
               if(el) el.closest('.chat-msg').remove();
