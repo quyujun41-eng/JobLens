@@ -10,11 +10,15 @@ EDGE_PROFILE_DIR = os.path.join(DATA_DIR, "edge_profile")
 RAW_DUMP_DIR = os.path.join(DATA_DIR, "raw")
 
 # AI API 配置
-# AI_PROVIDER: "anthropic" 用 Claude，"openai" 用 DeepSeek 或其他兼容接口
+# AI_PROVIDER: "anthropic" 用 Claude / "openai" 用 DeepSeek等兼容接口 / "ollama" 用本地模型
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "anthropic")
 AI_API_KEY = os.environ.get("AI_API_KEY", "")
 AI_BASE_URL = os.environ.get("AI_BASE_URL", "")   # anthropic 留空用默认；deepseek 填 https://api.deepseek.com
-AI_MODEL = os.environ.get("AI_MODEL", "claude-haiku-4-5-20251001")  # deepseek 改为 deepseek-chat
+AI_MODEL = os.environ.get("AI_MODEL", "claude-haiku-4-5-20251001")  # deepseek=deepseek-chat; ollama=qwen2.5:7b
+
+# Ollama 本地模型配置（AI_PROVIDER=ollama 时生效）
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 
 PORT = int(os.environ.get("PORT", 5000))
 

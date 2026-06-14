@@ -19,6 +19,12 @@ def _get_client():
         if config.AI_BASE_URL:
             kwargs["base_url"] = config.AI_BASE_URL
         _client = anthropic.Anthropic(**kwargs)
+    elif config.AI_PROVIDER == "ollama":
+        from openai import OpenAI
+        _client = OpenAI(
+            api_key="ollama",
+            base_url=config.OLLAMA_BASE_URL,
+        )
     else:
         from openai import OpenAI
         kwargs = {"api_key": config.AI_API_KEY}
@@ -28,11 +34,17 @@ def _get_client():
     return _client
 
 
+def _effective_model():
+    if config.AI_PROVIDER == "ollama":
+        return config.OLLAMA_MODEL
+    return config.AI_MODEL
+
+
 def _stream_chunks(messages, system=None, max_tokens=800):
     """统一流式接口，yield 文本片段，屏蔽 SDK 差异"""
     client = _get_client()
     if config.AI_PROVIDER == "anthropic":
-        kwargs = {"model": config.AI_MODEL, "max_tokens": max_tokens, "messages": messages}
+        kwargs = {"model": _effective_model(), "max_tokens": max_tokens, "messages": messages}
         if system:
             kwargs["system"] = system
         with client.messages.stream(**kwargs) as stream:
@@ -44,7 +56,7 @@ def _stream_chunks(messages, system=None, max_tokens=800):
             msgs.append({"role": "system", "content": system})
         msgs.extend(messages)
         stream = client.chat.completions.create(
-            model=config.AI_MODEL, messages=msgs, max_tokens=max_tokens, stream=True
+            model=_effective_model(), messages=msgs, max_tokens=max_tokens, stream=True
         )
         for chunk in stream:
             delta = chunk.choices[0].delta.content
@@ -57,18 +69,59 @@ def _call_once(messages, max_tokens=300):
     client = _get_client()
     if config.AI_PROVIDER == "anthropic":
         resp = client.messages.create(
-            model=config.AI_MODEL, max_tokens=max_tokens, messages=messages
+            model=_effective_model(), max_tokens=max_tokens, messages=messages
         )
         return resp.content[0].text.strip()
     else:
         resp = client.chat.completions.create(
-            model=config.AI_MODEL, messages=messages, max_tokens=max_tokens, stream=False
+            model=_effective_model(), messages=messages, max_tokens=max_tokens, stream=False
         )
         return resp.choices[0].message.content.strip()
 
 
+def _call_structured(messages, schema: dict, max_tokens=500) -> dict:
+    """结构化输出：强制模型按 JSON Schema 返回，失败时 fallback 到正则提取"""
+    client = _get_client()
+    if config.AI_PROVIDER == "anthropic":
+        resp = client.messages.create(
+            model=_effective_model(), max_tokens=max_tokens, messages=messages
+        )
+        raw = resp.content[0].text.strip()
+    elif config.AI_PROVIDER == "openai" and config.AI_BASE_URL == "":
+        # OpenAI 原生支持 response_format=json_schema
+        resp = client.chat.completions.create(
+            model=_effective_model(), messages=messages, max_tokens=max_tokens,
+            response_format={"type": "json_schema", "json_schema": {"name": "output", "schema": schema, "strict": True}},
+        )
+        raw = resp.choices[0].message.content.strip()
+    else:
+        resp = client.chat.completions.create(
+            model=_effective_model(), messages=messages, max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content.strip()
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        return json.loads(raw[start:end])
+    except Exception:
+        return {}
+
+
+_MATCH_SCORE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "score": {"type": "integer", "description": "匹配分数 0-100"},
+        "matched": {"type": "array", "items": {"type": "string"}, "description": "已具备的关键技能，最多3条"},
+        "reason": {"type": "string", "description": "一句话总结，30字内"},
+    },
+    "required": ["score", "matched", "reason"],
+    "additionalProperties": False,
+}
+
+
 def match_score(resume_text: str, jd_text: str) -> dict:
-    """计算简历与JD的匹配评分（0-100）"""
+    """计算简历与JD的匹配评分（0-100），使用结构化输出确保JSON格式"""
     if not resume_text or not jd_text:
         return {"score": 0, "reason": "简历或JD为空", "matched": []}
 
@@ -88,10 +141,10 @@ def match_score(resume_text: str, jd_text: str) -> dict:
 }}"""
 
     try:
-        text = _call_once([{"role": "user", "content": prompt}], max_tokens=300)
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        return json.loads(text[start:end])
+        result = _call_structured([{"role": "user", "content": prompt}], _MATCH_SCORE_SCHEMA, max_tokens=300)
+        if result and "score" in result:
+            return result
+        raise ValueError("empty")
     except Exception:
         return {"score": 0, "reason": "评分失败", "matched": []}
 

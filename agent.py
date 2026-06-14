@@ -1,8 +1,10 @@
 # !/usr/bin/env python
 # _*_ coding: utf-8 _*_
-"""Function Calling Agent：5个工具让Claude自主决定调用顺序和次数"""
+"""Function Calling Agent：Router分流 + 并行工具调用 + SummaryMemory对话压缩"""
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import config
 import analytics
 from models import Job, app as flask_app
@@ -74,6 +76,61 @@ TOOLS = [
     },
 ]
 
+
+# ── Router：意图分类 ─────────────────────────────────────────────────────
+
+_INTENT_LABELS = {
+    "job_search": ["搜索", "找工作", "哪些岗位", "招聘", "职位", "推荐工作", "职缺"],
+    "market_analysis": ["行情", "市场", "薪资", "趋势", "热门技能", "平均薪资", "排行", "分布"],
+    "resume_match": ["匹配", "简历", "适合", "评分", "gap", "差距", "我的技能"],
+    "interview": ["面试", "面经", "准备面试", "面试题", "考察什么"],
+}
+
+
+def classify_intent(question: str) -> str:
+    """快速本地意图分类（无需LLM调用），返回 intent label"""
+    q = question.lower()
+    for intent, keywords in _INTENT_LABELS.items():
+        if any(kw in q for kw in keywords):
+            return intent
+    return "general"
+
+
+# ── SummaryMemory：长对话压缩 ────────────────────────────────────────────
+
+_SUMMARY_THRESHOLD = 20  # 消息条数超过此值时触发压缩
+
+
+def _maybe_summarize(session_id: str, history: list) -> list:
+    """当历史消息过长时，调用 LLM 压缩旧消息为摘要，保留最近6条"""
+    if len(history) <= _SUMMARY_THRESHOLD:
+        return history
+
+    from models import ChatSession, db
+    old_msgs = history[:-6]
+    recent_msgs = history[-6:]
+
+    # 拼接旧消息为文本
+    text = "\n".join(
+        f"[{m['role']}]: {m['content'][:300]}" for m in old_msgs
+    )
+    prompt = f"请将以下对话历史压缩为一段100字以内的摘要，保留关键信息：\n\n{text}"
+    try:
+        from ai_features import _call_once
+        summary = _call_once([{"role": "user", "content": prompt}], max_tokens=200)
+        with flask_app.app_context():
+            sess = ChatSession.query.get(session_id)
+            if sess:
+                sess.summary = summary
+                db.session.commit()
+        # 将摘要作为第一条 assistant 消息注入
+        summary_msg = {"role": "assistant", "content": f"[对话摘要] {summary}"}
+        return [summary_msg] + recent_msgs
+    except Exception:
+        return recent_msgs
+
+
+# ── 工具执行 ────────────────────────────────────────────────────────────
 
 def _execute_tool(name: str, inp: dict, resume: str = "") -> str:
     """执行工具，返回结果文本"""
@@ -174,8 +231,49 @@ def _execute_tool(name: str, inp: dict, resume: str = "") -> str:
     return "工具执行失败"
 
 
-def agent_stream(question: str, history: list, resume: str = ""):
-    """Agent主入口，yield dict：tool_call / tool_result / text / done"""
+# ── 并行工具执行 ─────────────────────────────────────────────────────────
+
+def _execute_tools_parallel(tool_blocks, resume: str) -> dict:
+    """用 ThreadPoolExecutor 并行执行多个工具调用，返回 {tool_use_id: result}"""
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(tool_blocks)) as pool:
+        futures = {
+            pool.submit(_execute_tool, b.name, b.input, resume): b
+            for b in tool_blocks
+        }
+        for future in as_completed(futures):
+            b = futures[future]
+            try:
+                results[b.id] = future.result()
+            except Exception as e:
+                results[b.id] = f"工具执行出错: {e}"
+    return results
+
+
+def _execute_oai_tools_parallel(tool_calls, resume: str) -> dict:
+    """OpenAI 格式的并行工具执行，返回 {tool_call_id: result}"""
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(tool_calls)) as pool:
+        futures = {
+            pool.submit(_execute_tool, tc.function.name, json.loads(tc.function.arguments), resume): tc
+            for tc in tool_calls
+        }
+        for future in as_completed(futures):
+            tc = futures[future]
+            try:
+                results[tc.id] = future.result()
+            except Exception as e:
+                results[tc.id] = f"工具执行出错: {e}"
+    return results
+
+
+# ── Agent 主入口 ─────────────────────────────────────────────────────────
+
+def agent_stream(question: str, history: list, resume: str = "", session_id: str = ""):
+    """Agent主入口，yield dict：tool_call / tool_result / text / done
+    自动路由意图，对长对话应用 SummaryMemory 压缩"""
+    intent = classify_intent(question)
+
     system = (
         "你是 JobLens AI 求职助手，拥有实时岗位数据库访问权限。\n"
         "规则：\n"
@@ -184,8 +282,15 @@ def agent_stream(question: str, history: list, resume: str = ""):
         "3. 用户问匹配度时调用 match_resume\n"
         "4. 回答简洁专业，用数据支撑观点，重点加粗"
     )
+
+    # SummaryMemory：压缩过长历史
+    if session_id and len(history) > _SUMMARY_THRESHOLD:
+        history = _maybe_summarize(session_id, history)
+
     messages = [{"role": h["role"], "content": h["content"]} for h in history[-8:]]
     messages.append({"role": "user", "content": question})
+
+    yield {"type": "intent", "intent": intent}
 
     if config.AI_PROVIDER == "anthropic":
         yield from _anthropic_loop(messages, system, resume)
@@ -212,15 +317,19 @@ def _anthropic_loop(messages, system, resume):
             yield {"type": "done"}
             return
 
-        # 执行工具
-        tool_results = []
+        # 并行执行所有工具调用
         for b in tool_blocks:
             yield {"type": "tool_call", "tool": b.name, "input": b.input}
-            result = _execute_tool(b.name, b.input, resume)
+
+        parallel_results = _execute_tools_parallel(tool_blocks, resume)
+
+        tool_results = []
+        for b in tool_blocks:
+            result = parallel_results.get(b.id, "执行超时")
             yield {"type": "tool_result", "tool": b.name, "preview": result[:200]}
             tool_results.append({"type": "tool_result", "tool_use_id": b.id, "content": result})
 
-        # 构建下一轮消息（把ContentBlock转为dict）
+        # 构建下一轮消息（ContentBlock → dict）
         assistant_content = []
         for b in resp.content:
             if b.type == "text":
@@ -236,7 +345,11 @@ def _anthropic_loop(messages, system, resume):
 
 def _openai_loop(messages, system, resume):
     from openai import OpenAI
-    client = OpenAI(api_key=config.AI_API_KEY, base_url=config.AI_BASE_URL or None)
+    model = config.OLLAMA_MODEL if config.AI_PROVIDER == "ollama" else config.AI_MODEL
+    base_url = config.OLLAMA_BASE_URL if config.AI_PROVIDER == "ollama" else (config.AI_BASE_URL or None)
+    api_key = "ollama" if config.AI_PROVIDER == "ollama" else config.AI_API_KEY
+    client = OpenAI(api_key=api_key, base_url=base_url)
+
     oai_tools = [{"type": "function", "function": {
         "name": t["name"], "description": t["description"],
         "parameters": t["input_schema"],
@@ -245,7 +358,7 @@ def _openai_loop(messages, system, resume):
 
     for _round in range(6):
         resp = client.chat.completions.create(
-            model=config.AI_MODEL, max_tokens=1500,
+            model=model, max_tokens=1500,
             tools=oai_tools, messages=msgs,
         )
         msg = resp.choices[0].message
@@ -257,10 +370,15 @@ def _openai_loop(messages, system, resume):
             yield {"type": "done"}
             return
 
+        # 并行执行所有工具调用
         for tc in msg.tool_calls:
             inp = json.loads(tc.function.arguments)
             yield {"type": "tool_call", "tool": tc.function.name, "input": inp}
-            result = _execute_tool(tc.function.name, inp, resume)
+
+        parallel_results = _execute_oai_tools_parallel(msg.tool_calls, resume)
+
+        for tc in msg.tool_calls:
+            result = parallel_results.get(tc.id, "执行超时")
             yield {"type": "tool_result", "tool": tc.function.name, "preview": result[:200]}
             msgs.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 

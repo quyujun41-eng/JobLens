@@ -280,13 +280,62 @@ async def read_resource(uri: str) -> str:
 
 # ── 启动 ─────────────────────────────────────────────────
 
-async def main():
+async def _run_stdio():
+    """stdio 传输：供 Claude Desktop / Cursor 等 MCP 客户端使用"""
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
             write_stream,
             server.create_initialization_options(),
         )
+
+
+async def _run_sse(host: str = "0.0.0.0", port: int = 8765):
+    """SSE 传输：通过 HTTP 暴露 MCP Server，供 Web 客户端或远程调用使用
+    端点：GET /sse  —— 建立 SSE 连接
+    端点：POST /messages  —— 发送 JSON-RPC 消息
+    """
+    try:
+        from mcp.server.sse import SseServerTransport
+        from starlette.applications import Starlette
+        from starlette.routing import Route, Mount
+        import uvicorn
+
+        sse_transport = SseServerTransport("/messages")
+
+        async def handle_sse(request):
+            async with sse_transport.connect_sse(
+                request.scope, request.receive, request._send
+            ) as streams:
+                await server.run(
+                    streams[0], streams[1],
+                    server.create_initialization_options()
+                )
+
+        starlette_app = Starlette(routes=[
+            Route("/sse", endpoint=handle_sse),
+            Mount("/messages", app=sse_transport.handle_post_message),
+        ])
+
+        print(f"[MCP SSE] 启动于 http://{host}:{port}/sse")
+        config_uvicorn = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
+        await uvicorn.Server(config_uvicorn).serve()
+    except ImportError as e:
+        print(f"[MCP SSE] 缺少依赖 ({e})，请安装: pip install uvicorn starlette")
+
+
+async def main():
+    """默认以 stdio 模式启动；--sse 参数启动 SSE 模式"""
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sse", action="store_true", help="以 SSE HTTP 模式启动")
+    parser.add_argument("--port", type=int, default=8765, help="SSE 端口（默认 8765）")
+    args = parser.parse_args()
+
+    if args.sse:
+        await _run_sse(port=args.port)
+    else:
+        await _run_stdio()
 
 
 if __name__ == "__main__":

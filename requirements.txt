@@ -9,3 +9,5 @@ pdfplumber
 scikit-learn
 numpy
 mcp
+chromadb
+faster-whisper

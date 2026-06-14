@@ -13,6 +13,10 @@ import config
 import search as bm25
 from models import Company, Job, app, db
 
+# ── 中间件注册 ────────────────────────────────────────────
+import middleware
+middleware.register(app)
+
 # ── 页面路由 ──────────────────────────────────────────────
 
 @app.route("/")
@@ -294,7 +298,7 @@ def api_ask():
 
     def generate():
         try:
-            for chunk in agent_stream(question, history, resume):
+            for chunk in agent_stream(question, history, resume, session_id=session_id):
                 if chunk.get("type") == "text":
                     accumulated_text.append(chunk["text"])
                 elif chunk.get("type") in ("tool_call", "tool_result"):
@@ -440,6 +444,130 @@ def api_coverage():
                 row["cities"][city] = "locked"
         result.append(row)
     return jsonify(result)
+
+
+@app.route("/api/voice_to_text", methods=["POST"])
+def api_voice_to_text():
+    """语音转文字：接收音频文件，用 faster-whisper 转录为文本"""
+    if "file" not in request.files:
+        return jsonify({"error": "请上传音频文件"}), 400
+    f = request.files["file"]
+    try:
+        import io
+        import tempfile
+        import os
+        # 写到临时文件（faster-whisper 需要文件路径）
+        suffix = os.path.splitext(f.filename or "audio.wav")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            f.save(tmp.name)
+            tmp_path = tmp.name
+        try:
+            from faster_whisper import WhisperModel
+            model = WhisperModel("tiny", device="cpu", compute_type="int8")
+            segments, _ = model.transcribe(tmp_path, language="zh")
+            text = "".join(seg.text for seg in segments).strip()
+        finally:
+            os.unlink(tmp_path)
+        return jsonify({"text": text})
+    except Exception as e:
+        return jsonify({"error": f"转录失败：{e}"}), 500
+
+
+@app.route("/api/usage_stats")
+def api_usage_stats():
+    """可观测性：返回 API 用量统计（最近7天）"""
+    from models import UsageLog
+    from sqlalchemy import func
+    import datetime
+
+    since = datetime.datetime.now() - datetime.timedelta(days=7)
+    logs = UsageLog.query.filter(UsageLog.created_at >= since).all()
+
+    total = len(logs)
+    avg_latency = round(sum(l.latency_ms or 0 for l in logs) / total, 1) if total else 0
+    total_tokens = sum(l.tokens_estimated or 0 for l in logs)
+
+    # 按端点聚合
+    endpoint_stats: dict = {}
+    for l in logs:
+        ep = l.endpoint or "unknown"
+        if ep not in endpoint_stats:
+            endpoint_stats[ep] = {"count": 0, "errors": 0, "total_latency": 0}
+        endpoint_stats[ep]["count"] += 1
+        if l.status_code and l.status_code >= 400:
+            endpoint_stats[ep]["errors"] += 1
+        endpoint_stats[ep]["total_latency"] += l.latency_ms or 0
+
+    endpoints = [
+        {
+            "endpoint": ep,
+            "count": v["count"],
+            "error_rate": round(v["errors"] / v["count"] * 100, 1),
+            "avg_latency_ms": round(v["total_latency"] / v["count"], 1),
+        }
+        for ep, v in sorted(endpoint_stats.items(), key=lambda x: -x[1]["count"])
+    ]
+
+    return jsonify({
+        "period": "7d",
+        "total_requests": total,
+        "avg_latency_ms": avg_latency,
+        "total_tokens_estimated": total_tokens,
+        "endpoints": endpoints[:20],
+    })
+
+
+@app.route("/api/rag_eval")
+def api_rag_eval():
+    """RAG 评估：对指定查询计算 Precision@K 等指标"""
+    query = request.args.get("query", "").strip()
+    top_k = request.args.get("k", 10, type=int)
+    if not query:
+        return jsonify({"error": "缺少 query 参数"}), 400
+
+    # 取各路检索结果
+    import search as bm25_mod
+    from vector_search import vector_search as vec_search, hybrid_search
+
+    bm25_mod.rebuild_index_if_needed()
+    bm25_ids = bm25_mod.search(query, top_k=top_k)
+    vec_results = vec_search(query, top_k=top_k)
+    vec_ids = [jid for jid, _ in vec_results]
+    hybrid_ids = hybrid_search(query, top_k=top_k)
+
+    # 用 Rerank 启发式得分作为相关性标注（代替人工标注）
+    from rerank import rerank_score
+    gold_ids = set(rerank_score(query, hybrid_ids, top_k=top_k))
+
+    def precision_at_k(retrieved: list, relevant: set, k: int) -> float:
+        hits = sum(1 for jid in retrieved[:k] if jid in relevant)
+        return round(hits / k, 3) if k else 0.0
+
+    def recall_at_k(retrieved: list, relevant: set, k: int) -> float:
+        if not relevant:
+            return 0.0
+        hits = sum(1 for jid in retrieved[:k] if jid in relevant)
+        return round(hits / len(relevant), 3)
+
+    return jsonify({
+        "query": query,
+        "k": top_k,
+        "bm25": {
+            "precision": precision_at_k(bm25_ids, gold_ids, top_k),
+            "recall": recall_at_k(bm25_ids, gold_ids, top_k),
+            "ids": bm25_ids[:5],
+        },
+        "vector": {
+            "precision": precision_at_k(vec_ids, gold_ids, top_k),
+            "recall": recall_at_k(vec_ids, gold_ids, top_k),
+            "ids": vec_ids[:5],
+        },
+        "hybrid": {
+            "precision": precision_at_k(hybrid_ids, gold_ids, top_k),
+            "recall": recall_at_k(hybrid_ids, gold_ids, top_k),
+            "ids": hybrid_ids[:5],
+        },
+    })
 
 
 @app.errorhandler(Exception)

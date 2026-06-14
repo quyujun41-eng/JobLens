@@ -161,11 +161,15 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
 .chat-msg.user .chat-bubble { background: #4facfe; color: #fff; border-radius: 18px 18px 4px 18px; }
 .chat-msg.bot .chat-bubble { background: #f0f4ff; color: #334; border-radius: 18px 18px 18px 4px; }
 .chat-label { font-size: 11px; color: #aab; margin-bottom: 4px; }
-.chat-input-row { display: flex; gap: 10px; padding: 14px; border-top: 1px solid #f0f2f5; }
+.chat-input-row { display: flex; gap: 8px; padding: 14px; border-top: 1px solid #f0f2f5; align-items: center; }
 .chat-input { flex: 1; padding: 10px 16px; border: 1.5px solid #e0e6ef; border-radius: 20px; font-size: 14px; outline: none; }
 .chat-input:focus { border-color: #4facfe; }
 .chat-send { padding: 10px 20px; background: #4facfe; color: #fff; border: none; border-radius: 20px; font-size: 14px; cursor: pointer; font-weight: 600; white-space: nowrap; }
 .chat-send:disabled { background: #b0c8f0; cursor: default; }
+.voice-btn { width: 38px; height: 38px; border-radius: 50%; border: 1.5px solid #e0e6ef; background: #fff; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all .2s; }
+.voice-btn:hover { border-color: #4facfe; background: #f0f8ff; }
+.voice-btn.recording { background: #fee2e2; border-color: #f87171; animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
 /* 工具调用气泡 */
 .tool-call-bubble { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; font-size: 12px; color: #92400e; margin: 4px 0; }
 .tool-result-bubble { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 12px; color: #166534; margin: 4px 0; }
@@ -246,6 +250,9 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
   </div>
   <div class="nav-item" onclick="showPage('coverage',this)" data-page="coverage">
     <span class="nav-icon">🗺️</span> 数据覆盖
+  </div>
+  <div class="nav-item" onclick="showPage('observability',this)" data-page="observability">
+    <span class="nav-icon">📊</span> 用量监控
   </div>
   <div class="sidebar-footer">
     数据实时更新<br/>
@@ -462,6 +469,7 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
             </div>
           </div>
           <div class="chat-input-row">
+            <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()" title="语音输入">🎤</button>
             <input class="chat-input" id="chatInput" placeholder="问我任何关于求职的问题..." onkeydown="if(event.key==='Enter')sendChat()"/>
             <button class="chat-send" id="chatSend" onclick="sendChat()">发送</button>
           </div>
@@ -499,6 +507,36 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
             <tbody id="coverageTbody"></tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <!-- 用量监控 -->
+    <div class="page" id="page-observability">
+      <div class="stats-row" style="margin-bottom:16px;">
+        <div class="stat-card"><div class="stat-icon">📡</div><div class="stat-label">总请求数 (7天)</div><div class="stat-value" id="obs-total">-</div></div>
+        <div class="stat-card"><div class="stat-icon">⚡</div><div class="stat-label">平均延迟</div><div class="stat-value" id="obs-latency">-</div><div class="stat-sub">毫秒</div></div>
+        <div class="stat-card"><div class="stat-icon">🔤</div><div class="stat-label">预估 Token 消耗</div><div class="stat-value" id="obs-tokens">-</div></div>
+        <div class="stat-card" style="cursor:pointer;" onclick="loadObservability()"><div class="stat-icon">🔄</div><div class="stat-label">刷新</div><div class="stat-value" style="font-size:20px;">↺</div></div>
+      </div>
+      <div class="card">
+        <div class="section-title">端点用量明细</div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="border-bottom:1px solid #f0f2f5;color:#aab;">
+            <th style="text-align:left;padding:8px 0;">端点</th>
+            <th style="text-align:right;padding:8px 8px;">请求数</th>
+            <th style="text-align:right;padding:8px 8px;">错误率</th>
+            <th style="text-align:right;padding:8px 8px;">均延迟(ms)</th>
+          </tr></thead>
+          <tbody id="obsEndpointTbody"></tbody>
+        </table>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <div class="section-title">RAG 检索评估</div>
+        <div style="display:flex;gap:10px;margin-bottom:12px;">
+          <input id="ragEvalQuery" placeholder="输入评测查询词，如：RAG工程师" style="flex:1;padding:8px 14px;border:1.5px solid #e0e6ef;border-radius:8px;font-size:13px;outline:none;"/>
+          <button onclick="runRagEval()" style="padding:8px 18px;background:#4facfe;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;">评估</button>
+        </div>
+        <div id="ragEvalResult" style="font-size:13px;color:#556;"></div>
       </div>
     </div>
 
@@ -579,6 +617,7 @@ function showPage(name, navEl) {
     insights: ['市场洞察', '薪资分布 · 技能热度 · 趋势分析'],
     chat: ['AI 对话', '基于实时数据的智能求职助手'],
     coverage: ['数据覆盖', '城市×行业覆盖矩阵 · 申请开通'],
+    observability: ['用量监控', 'API请求统计 · Token用量 · RAG评估'],
   };
   var t = titles[name] || [name,''];
   document.getElementById('topbarTitle').textContent = t[0];
@@ -590,6 +629,7 @@ function showPage(name, navEl) {
   if(name==='chat') loadSessions();
   if(name==='coverage') loadCoverage();
   if(name==='resume') loadResume();
+  if(name==='observability') loadObservability();
 }
 
 // ── 仪表盘 ────────────────────────────────────────────────
@@ -1093,7 +1133,9 @@ function sendChat() {
             var chunk = JSON.parse(part.slice(6));
             if(chunk.session_id && !_currentSessionId) _currentSessionId = chunk.session_id;
 
-            if(chunk.type==='tool_call') {
+            if(chunk.type==='intent') {
+              // 意图分类结果，静默处理（可用于路由日志）
+            } else if(chunk.type==='tool_call') {
               var el=document.getElementById(thinkId);
               if(el) el.closest('.chat-msg').remove();
               appendToolCall(chunk.tool, chunk.input);
@@ -1202,6 +1244,85 @@ function submitUnlock() {
     showToast(d.message || '申请已提交', 3000);
     document.getElementById('pendingCount').textContent = (parseInt(document.getElementById('pendingCount').textContent)||0)+1;
   });
+}
+
+// ── 语音输入 ──────────────────────────────────────────────
+var _mediaRecorder = null, _audioChunks = [];
+function toggleVoice() {
+  var btn = document.getElementById('voiceBtn');
+  if (_mediaRecorder && _mediaRecorder.state === 'recording') {
+    _mediaRecorder.stop();
+    btn.classList.remove('recording');
+    btn.title = '语音输入';
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showToast('浏览器不支持麦克风', 2000); return;
+  }
+  navigator.mediaDevices.getUserMedia({audio: true}).then(function(stream) {
+    _audioChunks = [];
+    _mediaRecorder = new MediaRecorder(stream);
+    _mediaRecorder.ondataavailable = function(e) { _audioChunks.push(e.data); };
+    _mediaRecorder.onstop = function() {
+      stream.getTracks().forEach(function(t){t.stop();});
+      var blob = new Blob(_audioChunks, {type: 'audio/webm'});
+      var fd = new FormData();
+      fd.append('file', blob, 'voice.webm');
+      showToast('正在转录...', 5000);
+      fetch('/api/voice_to_text', {method: 'POST', body: fd})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if (d.text) {
+            document.getElementById('chatInput').value = d.text;
+            showToast('转录完成', 1500);
+          } else {
+            showToast(d.error || '转录失败', 2000);
+          }
+        }).catch(function(){showToast('转录请求失败', 2000);});
+    };
+    _mediaRecorder.start();
+    btn.classList.add('recording');
+    btn.title = '点击停止录音';
+    showToast('录音中...按钮停止', 3000);
+  }).catch(function(e){ showToast('无法访问麦克风：' + e.message, 2000); });
+}
+
+// ── 用量监控 ──────────────────────────────────────────────
+function loadObservability() {
+  fetch('/api/usage_stats').then(function(r){return r.json();}).then(function(d){
+    document.getElementById('obs-total').textContent = d.total_requests || 0;
+    document.getElementById('obs-latency').textContent = d.avg_latency_ms || 0;
+    document.getElementById('obs-tokens').textContent = d.total_tokens_estimated || 0;
+    var html = '';
+    (d.endpoints || []).forEach(function(ep){
+      html += '<tr style="border-bottom:1px solid #f5f7fa;">'
+        + '<td style="padding:8px 0;color:#334;">' + escHtml(ep.endpoint) + '</td>'
+        + '<td style="text-align:right;padding:8px;">' + ep.count + '</td>'
+        + '<td style="text-align:right;padding:8px;color:' + (ep.error_rate > 5 ? '#e11d48' : '#059669') + ';">' + ep.error_rate + '%</td>'
+        + '<td style="text-align:right;padding:8px;">' + ep.avg_latency_ms + '</td>'
+        + '</tr>';
+    });
+    document.getElementById('obsEndpointTbody').innerHTML = html || '<tr><td colspan="4" style="color:#aab;padding:20px;text-align:center;">暂无数据</td></tr>';
+  });
+}
+
+// ── RAG 评估 ──────────────────────────────────────────────
+function runRagEval() {
+  var q = document.getElementById('ragEvalQuery').value.trim();
+  if (!q) { showToast('请输入评测查询词', 1500); return; }
+  var el = document.getElementById('ragEvalResult');
+  el.textContent = '评估中...';
+  fetch('/api/rag_eval?query=' + encodeURIComponent(q) + '&k=10')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if (d.error) { el.textContent = '错误：' + d.error; return; }
+      el.innerHTML = '<table style="width:100%;border-collapse:collapse;">'
+        + '<tr style="color:#aab;border-bottom:1px solid #f0f2f5;"><th style="text-align:left;padding:6px 0;">方法</th><th style="text-align:right;">P@' + d.k + '</th><th style="text-align:right;">Recall@' + d.k + '</th></tr>'
+        + '<tr><td style="padding:6px 0;">BM25</td><td style="text-align:right;">' + d.bm25.precision + '</td><td style="text-align:right;">' + d.bm25.recall + '</td></tr>'
+        + '<tr><td style="padding:6px 0;">向量检索</td><td style="text-align:right;">' + d.vector.precision + '</td><td style="text-align:right;">' + d.vector.recall + '</td></tr>'
+        + '<tr style="font-weight:700;color:#4facfe;"><td style="padding:6px 0;">混合检索(RRF)</td><td style="text-align:right;">' + d.hybrid.precision + '</td><td style="text-align:right;">' + d.hybrid.recall + '</td></tr>'
+        + '</table>';
+    }).catch(function(){ el.textContent = '请求失败'; });
 }
 
 // ── ECharts 初始化 ─────────────────────────────────────────

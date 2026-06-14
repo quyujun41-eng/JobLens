@@ -113,6 +113,7 @@ class ChatSession(db.Model):
 
     id = db.Column(db.String(36), primary_key=True)  # UUID
     title = db.Column(db.String(100), nullable=True, name="标题")  # 取第一条消息前40字
+    summary = db.Column(db.Text, nullable=True, name="会话摘要")  # SummaryMemory压缩后的历史摘要
     created_at = db.Column(db.DateTime, default=datetime.datetime.now, name="创建时间")
     messages = db.relationship("ChatMessage", backref="session",
                                cascade="all, delete-orphan",
@@ -145,6 +146,22 @@ class CoverageRequest(db.Model):
 
     def __repr__(self):
         return "<CoverageRequest {}·{} {}>".format(self.city, self.industry, self.status)
+
+
+class UsageLog(db.Model):
+    """API用量日志：记录每次请求的端点、状态码、延迟和预估Token数"""
+    __tablename__ = "UsageLog"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    endpoint = db.Column(db.String(128), nullable=True, name="接口路径")
+    method = db.Column(db.String(8), nullable=True, name="HTTP方法")
+    status_code = db.Column(db.Integer, nullable=True, name="状态码")
+    latency_ms = db.Column(db.Integer, nullable=True, name="延迟毫秒")
+    tokens_estimated = db.Column(db.Integer, nullable=True, name="预估Token数")
+    created_at = db.Column(db.DateTime, default=datetime.datetime.now, name="时间")
+
+    def __repr__(self):
+        return "<UsageLog {} {} {}>".format(self.method, self.endpoint, self.status_code)
 
 
 class CrawlLog(db.Model):
