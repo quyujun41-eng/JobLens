@@ -6,3 +6,5 @@ anthropic
 openai
 rank-bm25
 pdfplumber
+scikit-learn
+numpy

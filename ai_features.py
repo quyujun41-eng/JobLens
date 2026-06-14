@@ -167,6 +167,43 @@ JD：{jd_text[:2000]}
         yield {"type": "error", "error": str(e)}
 
 
+def interview_prep_stream(jd_text: str, company_name: str, title: str, resume_text: str = ""):
+    """根据JD生成面试题预测和准备建议（流式）"""
+    if not jd_text:
+        yield {"type": "text", "text": "暂无岗位描述数据。"}
+        yield {"type": "done"}
+        return
+
+    resume_section = f"\n\n求职者简历：\n{resume_text[:1000]}" if resume_text else ""
+    prompt = f"""你是一位资深面试官，请根据以下岗位信息生成面试准备材料。
+
+公司：{company_name}  岗位：{title}
+JD要求：{jd_text[:2000]}{resume_section}
+
+请输出（Markdown格式）：
+
+## 核心考察方向（3-5个）
+列出该岗位面试最看重的技能/能力方向
+
+## 预测面试题
+
+**技术题（5题）**
+1. ...
+
+**场景/行为题（3题）**
+1. ...
+
+## 重点备考提示
+针对这个岗位的1-2条具体备考建议"""
+
+    try:
+        for text in _stream_chunks([{"role": "user", "content": prompt}], max_tokens=1000):
+            yield {"type": "text", "text": text}
+        yield {"type": "done"}
+    except Exception as e:
+        yield {"type": "error", "error": str(e)}
+
+
 def chat_stream(question: str, history: list, context_jobs: list = None):
     """AI 对话流式输出"""
     system = "你是 JobLens 的 AI 求职助手，专注于帮用户分析招聘市场、解读岗位要求、制定求职策略。回答简洁专业，多用数据和具体建议。"

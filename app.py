@@ -60,11 +60,15 @@ def api_job_list():
     salary_min = request.args.get("salary_min", type=float)
     salary_max = request.args.get("salary_max", type=float)
 
-    # BM25 语义搜索：有关键词时用 BM25 拿到排序后的 job_id 列表，再按此顺序分页
+    # 有关键词时用混合检索（TF-IDF向量 + BM25 RRF融合）
     bm25_ids = None
     if keyword:
-        bm25.rebuild_index_if_needed()
-        bm25_ids = bm25.search(keyword, top_k=100)
+        try:
+            from vector_search import hybrid_search
+            bm25_ids = hybrid_search(keyword, top_k=100)
+        except Exception:
+            bm25.rebuild_index_if_needed()
+            bm25_ids = bm25.search(keyword, top_k=100)
 
     return jsonify(analytics.job_list(
         page=page, keyword=keyword, company=company,
@@ -257,19 +261,116 @@ def api_company_intel():
 
 @app.route("/api/ask", methods=["POST"])
 def api_ask():
+    import uuid
+    from models import ChatSession, ChatMessage, db
     body = request.get_json(silent=True) or {}
     question = body.get("question", "").strip()
-    history = body.get("history", [])
+    session_id = body.get("session_id", "").strip() or None
+    resume = body.get("resume", "").strip()
     if not question:
         return jsonify({"error": "请输入问题"}), 400
 
-    # 传入部分岗位数据作为上下文
-    jobs_data = analytics.job_list(per_page=20)
-    from ai_features import chat_stream
+    # 获取或创建会话
+    with app.app_context():
+        session = ChatSession.query.get(session_id) if session_id else None
+        if not session:
+            session = ChatSession(id=str(uuid.uuid4()), title=question[:40])
+            db.session.add(session)
+            db.session.commit()
+            session_id = session.id
+
+        # 保存用户消息
+        db.session.add(ChatMessage(session_id=session_id, role="user", content=question))
+        db.session.commit()
+
+        # 加载历史（不含本条）
+        all_msgs = ChatMessage.query.filter_by(session_id=session_id).order_by(
+            ChatMessage.created_at).all()
+        history = [{"role": m.role, "content": m.content} for m in all_msgs[:-1]]
+
+    from agent import agent_stream
+    accumulated_text = []
+    accumulated_tools = []
 
     def generate():
         try:
-            for chunk in chat_stream(question, history, jobs_data.get("items", [])):
+            for chunk in agent_stream(question, history, resume):
+                if chunk.get("type") == "text":
+                    accumulated_text.append(chunk["text"])
+                elif chunk.get("type") in ("tool_call", "tool_result"):
+                    accumulated_tools.append(chunk)
+                payload = dict(chunk, session_id=session_id)
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type':'error','error':str(e)})}\n\n"
+        finally:
+            try:
+                with app.app_context():
+                    db.session.add(ChatMessage(
+                        session_id=session_id,
+                        role="assistant",
+                        content="".join(accumulated_text),
+                        tool_calls_json=json.dumps(accumulated_tools, ensure_ascii=False) if accumulated_tools else None,
+                    ))
+                    db.session.commit()
+            except Exception as e:
+                print(f"[警告] 保存助手消息失败: {e}")
+
+    return Response(
+        stream_with_context(generate()),
+        content_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.route("/api/chat_sessions")
+def api_chat_sessions():
+    from models import ChatSession
+    sessions = ChatSession.query.order_by(ChatSession.created_at.desc()).limit(30).all()
+    return jsonify([{
+        "id": s.id,
+        "title": s.title or "新对话",
+        "created_at": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "",
+    } for s in sessions])
+
+
+@app.route("/api/chat_history/<session_id>")
+def api_chat_history(session_id):
+    from models import ChatSession, ChatMessage
+    session = ChatSession.query.get(session_id)
+    if not session:
+        return jsonify({"error": "会话不存在"}), 404
+    msgs = ChatMessage.query.filter_by(session_id=session_id).order_by(ChatMessage.created_at).all()
+    return jsonify({
+        "session_id": session_id,
+        "title": session.title or "新对话",
+        "messages": [{
+            "role": m.role,
+            "content": m.content,
+            "tool_calls": json.loads(m.tool_calls_json) if m.tool_calls_json else [],
+            "created_at": m.created_at.strftime("%H:%M") if m.created_at else "",
+        } for m in msgs],
+    })
+
+
+@app.route("/api/interview_prep")
+def api_interview_prep():
+    job_id = request.args.get("job_id", "").strip()
+    resume = request.args.get("resume", "").strip()
+    if not job_id:
+        return Response('data: {"type":"error","error":"缺少job_id"}\n\n', content_type="text/event-stream")
+    job = Job.query.filter_by(job_id=job_id).first()
+    if not job:
+        return Response('data: {"type":"error","error":"岗位不存在"}\n\n', content_type="text/event-stream")
+
+    from ai_features import interview_prep_stream
+
+    def generate():
+        try:
+            for chunk in interview_prep_stream(
+                job.description or "", job.company.name if job.company else "", job.title or "", resume
+            ):
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         except Exception as e:
             traceback.print_exc()

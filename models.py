@@ -107,6 +107,30 @@ class FilteredJob(db.Model):
         return "<已过滤 {}@{} 原因={}>".format(self.title, self.company_name, self.reason)
 
 
+class ChatSession(db.Model):
+    """AI对话会话表：每次新对话创建一个session，支持历史记录"""
+    __tablename__ = "ChatSession"
+
+    id = db.Column(db.String(36), primary_key=True)  # UUID
+    title = db.Column(db.String(100), nullable=True, name="标题")  # 取第一条消息前40字
+    created_at = db.Column(db.DateTime, default=datetime.datetime.now, name="创建时间")
+    messages = db.relationship("ChatMessage", backref="session",
+                               cascade="all, delete-orphan",
+                               order_by="ChatMessage.created_at")
+
+
+class ChatMessage(db.Model):
+    """AI对话消息表：记录每轮用户/助手消息及工具调用"""
+    __tablename__ = "ChatMessage"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    session_id = db.Column(db.String(36), db.ForeignKey("ChatSession.id"), nullable=False)
+    role = db.Column(db.String(16), nullable=False, name="角色")  # user / assistant
+    content = db.Column(db.Text, nullable=False, name="内容")
+    tool_calls_json = db.Column(db.Text, nullable=True, name="工具调用记录")  # JSON数组
+    created_at = db.Column(db.DateTime, default=datetime.datetime.now, name="时间")
+
+
 class CoverageRequest(db.Model):
     """用户申请开通的城市+行业组合，调度器凌晨扫描并排队爬取"""
     __tablename__ = "CoverageRequest"

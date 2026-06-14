@@ -142,7 +142,17 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
 .chart-tall { height: 300px; }
 
 /* ── AI 对话 ── */
-.chat-layout { display: grid; grid-template-columns: 1fr 280px; gap: 16px; height: calc(100vh - 130px); }
+.chat-layout { display: grid; grid-template-columns: 200px 1fr 240px; gap: 14px; height: calc(100vh - 130px); }
+.chat-sessions { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); display: flex; flex-direction: column; overflow: hidden; }
+.session-header { padding: 14px; border-bottom: 1px solid #f0f2f5; display: flex; align-items: center; justify-content: space-between; }
+.session-header-title { font-size: 13px; font-weight: 600; color: #1a2332; }
+.new-session-btn { padding: 5px 10px; background: #4facfe; color: #fff; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.session-list { flex: 1; overflow-y: auto; }
+.session-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #f8f9fa; transition: background .15s; }
+.session-item:hover { background: #f0f8ff; }
+.session-item.active { background: #e8f4ff; border-left: 3px solid #4facfe; }
+.session-item-title { font-size: 12px; font-weight: 600; color: #334; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-item-time { font-size: 11px; color: #aab; margin-top: 2px; }
 .chat-main { display: flex; flex-direction: column; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
 .chat-box { flex: 1; overflow-y: auto; padding: 20px; }
 .chat-msg { margin-bottom: 16px; }
@@ -156,6 +166,9 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
 .chat-input:focus { border-color: #4facfe; }
 .chat-send { padding: 10px 20px; background: #4facfe; color: #fff; border: none; border-radius: 20px; font-size: 14px; cursor: pointer; font-weight: 600; white-space: nowrap; }
 .chat-send:disabled { background: #b0c8f0; cursor: default; }
+/* 工具调用气泡 */
+.tool-call-bubble { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; font-size: 12px; color: #92400e; margin: 4px 0; }
+.tool-result-bubble { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 12px; color: #166534; margin: 4px 0; }
 .chat-suggestions { padding: 16px; }
 .chat-suggest-title { font-size: 12px; color: #99a; margin-bottom: 8px; font-weight: 600; }
 .suggest-btn { display: block; width: 100%; padding: 8px 12px; border: 1.5px solid #e0e6ef; border-radius: 8px; font-size: 12px; color: #556; cursor: pointer; margin-bottom: 6px; text-align: left; background: #fff; transition: all .15s; }
@@ -163,6 +176,12 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
 .thinking { color: #aab; font-size: 13px; }
 .thinking::after { content: ''; animation: dots 1.2s infinite; }
 @keyframes dots { 0%,20%{content:'.'} 40%{content:'..'} 60%,100%{content:'...'} }
+/* 面试题卡片 */
+.interview-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-top: 14px; }
+.interview-stream { font-size: 13px; color: #334; line-height: 1.8; white-space: pre-wrap; }
+.interview-stream h2 { font-size: 14px; font-weight: 700; color: #1a2332; margin: 14px 0 6px; }
+.interview-stream strong { color: #1a2332; }
+.btn-interview { padding: 8px 18px; background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; border: none; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 600; }
 
 /* ── 数据覆盖 ── */
 .coverage-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -349,6 +368,11 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
             <div class="section-title">公司情报 <button onclick="runCompanyIntel()" style="float:right;padding:3px 10px;border:1.5px solid #4facfe;color:#4facfe;background:#fff;border-radius:10px;font-size:11px;cursor:pointer;">解读</button></div>
             <div id="intelContent" class="md" style="color:#aab;font-size:13px;">点击「解读」分析公司业务方向和面试重点</div>
           </div>
+          <!-- 面试题生成 -->
+          <div class="interview-card">
+            <div class="section-title">面试题预测 <button class="btn-interview" onclick="runInterviewPrep()" style="float:right;font-size:11px;padding:4px 12px;">生成面试题</button></div>
+            <div id="interviewContent" class="interview-stream" style="color:#aab;font-size:13px;">点击「生成面试题」，AI 根据JD预测高频考题</div>
+          </div>
         </div>
       </div>
     </div>
@@ -421,11 +445,20 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
     <!-- AI 对话 -->
     <div class="page" id="page-chat">
       <div class="chat-layout">
+        <!-- 历史会话面板 -->
+        <div class="chat-sessions">
+          <div class="session-header">
+            <span class="session-header-title">历史对话</span>
+            <button class="new-session-btn" onclick="newChatSession()">+ 新对话</button>
+          </div>
+          <div class="session-list" id="sessionList"></div>
+        </div>
+        <!-- 主对话区 -->
         <div class="chat-main">
           <div class="chat-box" id="chatBox">
             <div class="chat-msg bot">
               <div class="chat-label">AI 助手</div>
-              <div class="chat-bubble">你好！我是 JobLens AI 助手，可以帮你分析招聘市场、解读岗位要求、制定求职策略。你有什么想了解的？</div>
+              <div class="chat-bubble">你好！我是 JobLens AI 助手，已接入岗位数据库。可以帮你：搜岗位、算匹配分、分析市场行情、生成面试题。</div>
             </div>
           </div>
           <div class="chat-input-row">
@@ -433,14 +466,15 @@ body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f0f2f
             <button class="chat-send" id="chatSend" onclick="sendChat()">发送</button>
           </div>
         </div>
+        <!-- 快捷提问 -->
         <div class="card chat-suggestions">
           <div class="chat-suggest-title">快捷提问</div>
-          <button class="suggest-btn" onclick="askChat('当前数据库中薪资最高的岗位有哪些？')">薪资最高的岗位</button>
+          <button class="suggest-btn" onclick="askChat('薪资最高的AI岗位有哪些？')">薪资最高的岗位</button>
           <button class="suggest-btn" onclick="askChat('应届生有哪些合适的岗位推荐？')">应届生岗位推荐</button>
           <button class="suggest-btn" onclick="askChat('AI工程师方向最需要哪些技能？')">AI工程师必备技能</button>
-          <button class="suggest-btn" onclick="askChat('如何准备大模型应用开发的面试？')">面试准备建议</button>
           <button class="suggest-btn" onclick="askChat('目前市场对RAG和Agent的需求怎么样？')">RAG/Agent 市场需求</button>
-          <button class="suggest-btn" onclick="askChat('哪些公司在做AI应用方向，适合投递？')">推荐投递公司</button>
+          <button class="suggest-btn" onclick="askChat('哪些公司的AI岗位薪资最高？')">高薪公司排行</button>
+          <button class="suggest-btn" onclick="askChat('帮我分析当前招聘趋势')">招聘趋势分析</button>
         </div>
       </div>
     </div>
@@ -553,6 +587,7 @@ function showPage(name, navEl) {
   if(name==='dashboard' && !window._dashboardLoaded) loadDashboard();
   if(name==='jobs' && !window._jobsLoaded) loadJobs();
   if(name==='insights') loadInsights();
+  if(name==='chat') loadSessions();
   if(name==='coverage') loadCoverage();
   if(name==='resume') loadResume();
 }
@@ -801,6 +836,15 @@ function runCompanyIntel() {
     .then(function(resp){ return sseStream(resp, 'intelContent', text); });
 }
 
+function runInterviewPrep() {
+  if(!currentJobId){ showToast('请先打开一个岗位'); return; }
+  var resume = localStorage.getItem('joblens_resume') || '';
+  document.getElementById('interviewContent').innerHTML = '<span class="thinking">AI 正在生成面试题</span>';
+  var url = '/api/interview_prep?job_id='+encodeURIComponent(currentJobId)
+    + (resume ? '&resume='+encodeURIComponent(resume.slice(0,500)) : '');
+  fetch(url).then(function(resp){ return sseStream(resp, 'interviewContent', ''); });
+}
+
 function sseStream(resp, elId, text) {
   var reader = resp.body.getReader();
   var decoder = new TextDecoder();
@@ -964,6 +1008,56 @@ function askChat(q) {
   sendChat();
 }
 
+// ── 会话管理 ──────────────────────────────────────────────
+var _currentSessionId = null;
+
+function loadSessions() {
+  fetch('/api/chat_sessions').then(r=>r.json()).then(function(sessions){
+    var html = '';
+    sessions.forEach(function(s){
+      var cls = s.id === _currentSessionId ? ' active' : '';
+      html += '<div class="session-item'+cls+'" onclick="loadSession(\''+s.id+'\')">'
+        + '<div class="session-item-title">'+escHtml(s.title)+'</div>'
+        + '<div class="session-item-time">'+s.created_at+'</div></div>';
+    });
+    document.getElementById('sessionList').innerHTML = html || '<div style="padding:14px;font-size:12px;color:#aab;">暂无历史对话</div>';
+  }).catch(function(){});
+}
+
+function newChatSession() {
+  _currentSessionId = null;
+  document.getElementById('chatBox').innerHTML =
+    '<div class="chat-msg bot"><div class="chat-label">AI 助手</div>'
+    + '<div class="chat-bubble">新对话已开始，有什么可以帮你的？</div></div>';
+  loadSessions();
+}
+
+function loadSession(sessionId) {
+  fetch('/api/chat_history/'+sessionId).then(r=>r.json()).then(function(data){
+    if(data.error) return;
+    _currentSessionId = sessionId;
+    var box = document.getElementById('chatBox');
+    box.innerHTML = '';
+    data.messages.forEach(function(m){
+      if(m.role === 'user') {
+        appendChatMsg('user', escHtml(m.content));
+      } else {
+        // 先显示工具调用记录
+        (m.tool_calls || []).forEach(function(tc){
+          if(tc.type === 'tool_call') appendToolCall(tc.tool, tc.input);
+          if(tc.type === 'tool_result') appendToolResult(tc.tool, tc.preview);
+        });
+        appendChatMsg('bot', renderMarkdown(m.content));
+      }
+    });
+    box.scrollTop = 9999;
+    // 高亮选中
+    document.querySelectorAll('.session-item').forEach(function(el){
+      el.classList.toggle('active', el.onclick.toString().includes(sessionId));
+    });
+  });
+}
+
 function sendChat() {
   var input = document.getElementById('chatInput');
   var q = input.value.trim();
@@ -974,21 +1068,22 @@ function sendChat() {
 
   appendChatMsg('user', escHtml(q));
   var thinkId = 'think_'+Date.now();
-  appendChatMsg('bot', '<span class="thinking" id="'+thinkId+'">AI 正在思考</span>');
+  appendChatMsg('bot', '<span class="thinking" id="'+thinkId+'">AI 正在调用工具</span>');
 
   var text = '';
   var bubbleId = 'bubble_'+Date.now();
   var bubbleCreated = false;
+  var resume = localStorage.getItem('joblens_resume') || '';
 
   fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({question:q, history:chatHistory})
+    body:JSON.stringify({question:q, session_id:_currentSessionId, resume:resume})
   }).then(function(resp){
     var reader = resp.body.getReader();
     var decoder = new TextDecoder();
     var buf = '';
     function read(){
       reader.read().then(function(result){
-        if(result.done){ btn.disabled=false; return; }
+        if(result.done){ btn.disabled=false; loadSessions(); return; }
         buf += decoder.decode(result.value,{stream:true});
         var parts = buf.split('\n\n');
         buf = parts.pop();
@@ -996,21 +1091,26 @@ function sendChat() {
           if(!part.startsWith('data: ')) return;
           try {
             var chunk = JSON.parse(part.slice(6));
-            if(chunk.type==='text') {
+            if(chunk.session_id && !_currentSessionId) _currentSessionId = chunk.session_id;
+
+            if(chunk.type==='tool_call') {
+              var el=document.getElementById(thinkId);
+              if(el) el.closest('.chat-msg').remove();
+              appendToolCall(chunk.tool, chunk.input);
+            } else if(chunk.type==='tool_result') {
+              appendToolResult(chunk.tool, chunk.preview);
+            } else if(chunk.type==='text') {
               if(!bubbleCreated){
-                var el=document.getElementById(thinkId);
-                if(el) el.closest('.chat-msg').remove();
                 appendChatMsg('bot','<span id="'+bubbleId+'"></span>');
                 bubbleCreated=true;
               }
               text += chunk.text;
               var el=document.getElementById(bubbleId);
-              if(el) el.textContent = text;
+              if(el) el.innerHTML = renderMarkdown(text);
               document.getElementById('chatBox').scrollTop=9999;
             } else if(chunk.type==='done') {
-              chatHistory.push({role:'user',content:q});
-              chatHistory.push({role:'assistant',content:text});
               btn.disabled=false;
+              loadSessions();
             } else if(chunk.type==='error') {
               var el=document.getElementById(thinkId);
               if(el) el.closest('.chat-msg').remove();
@@ -1029,6 +1129,23 @@ function sendChat() {
     appendChatMsg('bot','<span style="color:#e85d5d;">请求失败，请重试</span>');
     btn.disabled=false;
   });
+}
+
+function appendToolCall(tool, inp) {
+  var box = document.getElementById('chatBox');
+  var div = document.createElement('div');
+  var inputStr = typeof inp === 'object' ? JSON.stringify(inp).replace(/"/g,'') : String(inp);
+  div.innerHTML = '<div class="tool-call-bubble">🔧 调用 <strong>'+escHtml(tool)+'</strong>：'+escHtml(inputStr.slice(0,80))+'...</div>';
+  box.appendChild(div);
+  box.scrollTop = 9999;
+}
+
+function appendToolResult(tool, preview) {
+  var box = document.getElementById('chatBox');
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="tool-result-bubble">✅ <strong>'+escHtml(tool)+'</strong> 返回：'+escHtml((preview||'').slice(0,100))+'</div>';
+  box.appendChild(div);
+  box.scrollTop = 9999;
 }
 
 function appendChatMsg(role, content) {
