@@ -43,11 +43,12 @@ def _is_login_page(page) -> bool:
     return "login" in page.url
 
 
-def collect_job_cards(page, keyword: str) -> list:
+def collect_job_cards(page, keyword: str, city_code: str = None) -> list:
     """在搜索结果列表页收集岗位卡片基础信息（标题/公司/薪资/链接等）"""
+    city_code = city_code or config.CITY_CODE
     cards = []
     for page_no in range(1, config.MAX_PAGES_PER_KEYWORD + 1):
-        url = SEARCH_URL_TEMPLATE.format(keyword=keyword, city_code=config.CITY_CODE)
+        url = SEARCH_URL_TEMPLATE.format(keyword=keyword, city_code=city_code)
         if page_no > 1:
             url += f"&page={page_no}"
 
@@ -185,9 +186,10 @@ def fetch_job_detail(page, card: dict) -> dict:
     return card
 
 
-def run(keywords=None, with_detail=True, save_to_db=False):
+def run(keywords=None, with_detail=True, save_to_db=False, city_code=None):
     """爬虫主入口：按关键词列表搜索 -> 抓详情 -> 解析 -> 落盘JSON（save_to_db=True 时同步入库并写CrawlLog）"""
     keywords = keywords or config.SEARCH_KEYWORDS
+    city_code = city_code or config.CITY_CODE
 
     if not os.path.exists(config.EDGE_PROFILE_DIR):
         print("未找到登录态目录，请先运行: python crawler/login.py 完成一次手动登录")
@@ -210,7 +212,7 @@ def run(keywords=None, with_detail=True, save_to_db=False):
 
         for keyword in keywords:
             print(f"\n=== 开始搜索关键词: {keyword} ===")
-            cards = collect_job_cards(page, keyword)
+            cards = collect_job_cards(page, keyword, city_code=city_code)
             print(f"[{keyword}] 共收集 {len(cards)} 条基础信息")
 
             if with_detail:

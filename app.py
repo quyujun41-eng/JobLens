@@ -284,25 +284,59 @@ def api_ask():
 
 @app.route("/api/request_coverage", methods=["POST"])
 def api_request_coverage():
+    from models import CoverageRequest, db
     body = request.get_json(silent=True) or {}
     city = body.get("city", "").strip()
     industry = body.get("industry", "").strip()
     email = body.get("email", "").strip()
     if not city or not industry:
         return jsonify({"error": "请选择城市和行业"}), 400
-    # 实际项目中这里写入请求队列/数据库；Demo直接返回成功
-    print(f"[申请开通] 城市={city} 行业={industry} 联系邮箱={email}")
-    return jsonify({"success": True, "message": f"已收到申请，{city}·{industry} 数据将在3-7天内上线"})
+
+    # 核心组合已覆盖，无需申请
+    core_pairs = {(c["city"], c["industry"]) for c in config.CORE_COMBOS}
+    if (city, industry) in core_pairs:
+        return jsonify({"success": True, "message": f"{city}·{industry} 是核心组合，每周自动更新"})
+
+    # 已有记录则不重复写入
+    existing = CoverageRequest.query.filter_by(city=city, industry=industry).filter(
+        CoverageRequest.status.in_(["pending", "crawling", "done"])
+    ).first()
+    if existing:
+        status_text = {"pending": "已在队列中", "crawling": "正在爬取", "done": "已完成"}.get(existing.status, "")
+        return jsonify({"success": True, "message": f"{city}·{industry} {status_text}，次日凌晨更新"})
+
+    req = CoverageRequest(city=city, industry=industry, email=email or None)
+    db.session.add(req)
+    db.session.commit()
+    print(f"[申请开通] 城市={city} 行业={industry} 邮箱={email}，已加入爬取队列")
+    return jsonify({"success": True, "message": f"已收到申请，{city}·{industry} 将在次日凌晨爬取，约1天内上线"})
 
 
 @app.route("/api/coverage")
 def api_coverage():
-    covered = {(c["city"], c["industry"]) for c in config.COVERED_COMBOS}
+    from models import CoverageRequest
+
+    core_pairs = {(c["city"], c["industry"]) for c in config.CORE_COMBOS}
+    done_pairs = {
+        (r.city, r.industry)
+        for r in CoverageRequest.query.filter_by(status="done").all()
+    }
+    crawling_pairs = {
+        (r.city, r.industry)
+        for r in CoverageRequest.query.filter_by(status="crawling").all()
+    }
+
     result = []
-    for industry in config.INDUSTRIES[:8]:  # 展示前8个行业
+    for industry in config.CORE_INDUSTRIES:
         row = {"industry": industry, "cities": {}}
-        for city in config.CITIES.keys():
-            row["cities"][city] = (city, industry) in covered
+        for city in config.CORE_CITIES.keys():
+            pair = (city, industry)
+            if pair in core_pairs or pair in done_pairs:
+                row["cities"][city] = "active"
+            elif pair in crawling_pairs:
+                row["cities"][city] = "progress"
+            else:
+                row["cities"][city] = "locked"
         result.append(row)
     return jsonify(result)
 

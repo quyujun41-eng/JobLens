@@ -107,6 +107,22 @@ class FilteredJob(db.Model):
         return "<已过滤 {}@{} 原因={}>".format(self.title, self.company_name, self.reason)
 
 
+class CoverageRequest(db.Model):
+    """用户申请开通的城市+行业组合，调度器凌晨扫描并排队爬取"""
+    __tablename__ = "CoverageRequest"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    city = db.Column(db.String(32), nullable=False, name="城市")
+    industry = db.Column(db.String(64), nullable=False, name="行业")
+    email = db.Column(db.String(128), nullable=True, name="联系邮箱")
+    status = db.Column(db.String(16), default="pending", name="状态")  # pending / crawling / done
+    created_at = db.Column(db.DateTime, default=datetime.datetime.now, name="申请时间")
+    crawled_at = db.Column(db.DateTime, nullable=True, name="完成时间")
+
+    def __repr__(self):
+        return "<CoverageRequest {}·{} {}>".format(self.city, self.industry, self.status)
+
+
 class CrawlLog(db.Model):
     """抓取日志表：记录每个关键词每次抓取批次的执行情况，便于监控健康状况"""
     __tablename__ = "CrawlLog"

@@ -27,20 +27,31 @@ CITIES = {
     "杭州": "101210100",
 }
 
-# 当前爬取目标（单次任务用）
+# 当前爬取目标（单次手动任务用，调度器不用这个）
 CITY_NAME = os.environ.get("CRAWL_CITY", "深圳")
 CITY_CODE = CITIES.get(CITY_NAME, "101280600")
 
-# 已覆盖的城市+行业组合（用于覆盖矩阵展示）
-COVERED_COMBOS = [
-    {"city": "深圳", "industry": "AI/大模型"},
-    {"city": "深圳", "industry": "后端开发"},
-    {"city": "北京", "industry": "AI/大模型"},
-    {"city": "北京", "industry": "后端开发"},
-    {"city": "上海", "industry": "AI/大模型"},
+# ── 核心覆盖策略：5行业 × 4城市 = 20个组合，每天凌晨滚动更新3个，约一周完整轮一遍 ──
+CORE_INDUSTRIES = ["AI/大模型", "后端开发", "数据分析", "产品经理", "运营"]
+
+CORE_CITIES = {
+    "深圳": "101280600",
+    "北京": "101010100",
+    "上海": "101020100",
+    "广州": "101280100",
+}
+
+# 20个核心组合，按城市优先排列，决定滚动更新顺序
+CORE_COMBOS = [
+    {"city": city, "industry": industry, "city_code": code}
+    for city, code in CORE_CITIES.items()
+    for industry in CORE_INDUSTRIES
 ]
 
-# 行业分类（15大类）
+COMBOS_PER_DAY = 3          # 每天凌晨爬取的核心组合数，~7天一轮
+CRAWL_CRON_HOUR = 2         # 定时任务触发时间（凌晨2点）
+
+# 行业分类（完整15大类，非核心行业走「申请开通」队列）
 INDUSTRIES = [
     "AI/大模型", "后端开发", "前端开发", "数据分析", "算法工程师",
     "产品经理", "运营", "测试/QA", "DevOps/运维", "安全",
