@@ -358,13 +358,16 @@ def agent_stream(question: str, history: list, resume: str = "", session_id: str
 
 def _anthropic_loop(messages, system, resume):
     import anthropic
+    from ai_features import get_model_params
     client = anthropic.Anthropic(api_key=config.AI_API_KEY)
     msgs = list(messages)
+    p = get_model_params()
 
     for _round in range(6):
         resp = client.messages.create(
             model=config.AI_MODEL, max_tokens=1500,
             system=system, tools=TOOLS, messages=msgs,
+            temperature=p["temperature"], top_p=p["top_p"],
         )
         tool_blocks = [b for b in resp.content if b.type == "tool_use"]
         text_blocks = [b for b in resp.content if b.type == "text"]
@@ -403,10 +406,12 @@ def _anthropic_loop(messages, system, resume):
 
 def _openai_loop(messages, system, resume):
     from openai import OpenAI
+    from ai_features import get_model_params
     model = config.OLLAMA_MODEL if config.AI_PROVIDER == "ollama" else config.AI_MODEL
     base_url = config.OLLAMA_BASE_URL if config.AI_PROVIDER == "ollama" else (config.AI_BASE_URL or None)
     api_key = "ollama" if config.AI_PROVIDER == "ollama" else config.AI_API_KEY
     client = OpenAI(api_key=api_key, base_url=base_url)
+    p = get_model_params()
 
     oai_tools = [{"type": "function", "function": {
         "name": t["name"], "description": t["description"],
@@ -418,6 +423,7 @@ def _openai_loop(messages, system, resume):
         resp = client.chat.completions.create(
             model=model, max_tokens=1500,
             tools=oai_tools, messages=msgs,
+            temperature=p["temperature"], top_p=p["top_p"], presence_penalty=p["presence_penalty"],
         )
         msg = resp.choices[0].message
         msgs.append(msg)

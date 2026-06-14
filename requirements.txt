@@ -14,3 +14,7 @@ faster-whisper
 edge-tts
 # 可选：sentence-transformers（本地Embedding，首次下载~400MB）
 # sentence-transformers
+# 可选：Cohere Rerank API（RERANK_PROVIDER=cohere，需设置 COHERE_API_KEY）
+# cohere
+# 可选：BGE Reranker 本地精排（RERANK_PROVIDER=flagembedding，首次下载~400MB）
+# FlagEmbedding

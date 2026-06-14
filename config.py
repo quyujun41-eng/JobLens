@@ -20,6 +20,17 @@ AI_MODEL = os.environ.get("AI_MODEL", "claude-haiku-4-5-20251001")  # deepseek=d
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 
+# 模型生成参数（可通过环境变量设置全局默认，也可在 /api/ask 请求体中按次覆盖）
+AI_TEMPERATURE = float(os.environ.get("AI_TEMPERATURE", "0.7"))
+AI_TOP_P = float(os.environ.get("AI_TOP_P", "1.0"))
+AI_PRESENCE_PENALTY = float(os.environ.get("AI_PRESENCE_PENALTY", "0.0"))  # 仅 OpenAI 兼容接口支持
+
+# Rerank 配置
+# RERANK_PROVIDER: score（启发式，无需API）| llm（LLM打分）| cohere（Cohere API）| flagembedding（BGE本地）
+RERANK_PROVIDER = os.environ.get("RERANK_PROVIDER", "score")
+COHERE_API_KEY = os.environ.get("COHERE_API_KEY", "")
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "")  # cohere: rerank-multilingual-v3.0 / bge: BAAI/bge-reranker-base
+
 PORT = int(os.environ.get("PORT", 5000))
 
 # 城市配置

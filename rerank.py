@@ -112,3 +112,89 @@ def rerank_llm(query: str, job_ids: list, top_k: int = 10) -> list:
         return ordered_ids[:top_k]
     except Exception:
         return candidates[:top_k]
+
+
+def rerank_cohere(query: str, job_ids: list, top_k: int = 10) -> list:
+    """Cohere Rerank API 精排（需设置 COHERE_API_KEY 环境变量）
+    默认模型 rerank-multilingual-v3.0，支持中文；fallback 到 rerank_score
+    """
+    if not config.COHERE_API_KEY:
+        return rerank_score(query, job_ids, top_k)
+    candidates = job_ids[:50]
+    if not candidates:
+        return []
+
+    from models import Job, app
+    docs, doc_ids = [], []
+    with app.app_context():
+        for jid in candidates:
+            job = Job.query.filter_by(job_id=jid).first()
+            if not job:
+                continue
+            tags = json.loads(job.skill_tags) if job.skill_tags else []
+            text = f"{job.title} | {' '.join(tags[:6])} | {(job.description or '')[:300]}"
+            docs.append(text)
+            doc_ids.append(jid)
+
+    if not docs:
+        return candidates[:top_k]
+
+    try:
+        import cohere
+        co = cohere.Client(config.COHERE_API_KEY)
+        rerank_model = config.RERANK_MODEL or "rerank-multilingual-v3.0"
+        response = co.rerank(query=query, documents=docs, model=rerank_model, top_n=top_k)
+        return [doc_ids[r.index] for r in response.results]
+    except Exception:
+        return rerank_score(query, job_ids, top_k)
+
+
+def rerank_flagembedding(query: str, job_ids: list, top_k: int = 10) -> list:
+    """BGE Reranker 本地精排（需安装 FlagEmbedding，首次下载模型约400MB）
+    默认模型 BAAI/bge-reranker-base，支持中英文；fallback 到 rerank_score
+    """
+    candidates = job_ids[:50]
+    if not candidates:
+        return []
+
+    from models import Job, app
+    docs, doc_ids = [], []
+    with app.app_context():
+        for jid in candidates:
+            job = Job.query.filter_by(job_id=jid).first()
+            if not job:
+                continue
+            text = f"{job.title} {(job.description or '')[:300]}"
+            docs.append(text)
+            doc_ids.append(jid)
+
+    if not docs:
+        return candidates[:top_k]
+
+    try:
+        from FlagEmbedding import FlagReranker
+        model_name = config.RERANK_MODEL or "BAAI/bge-reranker-base"
+        reranker = FlagReranker(model_name, use_fp16=True)
+        pairs = [(query, d) for d in docs]
+        scores = reranker.compute_score(pairs, normalize=True)
+        if isinstance(scores, (int, float)):
+            scores = [scores]
+        ranked = sorted(zip(doc_ids, scores), key=lambda x: x[1], reverse=True)
+        return [jid for jid, _ in ranked[:top_k]]
+    except Exception:
+        return rerank_score(query, job_ids, top_k)
+
+
+def rerank(query: str, job_ids: list, top_k: int = 10, provider: str = None) -> list:
+    """统一 Rerank 入口：根据 RERANK_PROVIDER 自动选择实现
+    provider 参数优先于 RERANK_PROVIDER 环境变量
+    可选值：score（默认）| llm | cohere | flagembedding
+    """
+    p = provider or config.RERANK_PROVIDER
+    if p == "cohere":
+        return rerank_cohere(query, job_ids, top_k)
+    if p == "flagembedding":
+        return rerank_flagembedding(query, job_ids, top_k)
+    if p == "llm":
+        return rerank_llm(query, job_ids, top_k)
+    return rerank_score(query, job_ids, top_k)

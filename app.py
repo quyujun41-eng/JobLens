@@ -272,6 +272,13 @@ def api_ask():
     session_id = body.get("session_id", "").strip() or None
     resume = body.get("resume", "").strip()
     mode = body.get("mode", "standard")  # standard | evaluator | orchestrator
+    # 模型生成参数（可选，覆盖 config 默认值）
+    from ai_features import set_call_params
+    set_call_params(
+        temperature=body.get("temperature"),
+        top_p=body.get("top_p"),
+        presence_penalty=body.get("presence_penalty"),
+    )
     if not question:
         return jsonify({"error": "请输入问题"}), 400
 

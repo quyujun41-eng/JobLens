@@ -4,9 +4,30 @@
 通过 AI_PROVIDER 环境变量切换：anthropic（默认） / openai"""
 
 import json
+import threading
 import config
 
 _client = None
+_call_params = threading.local()
+
+
+def set_call_params(temperature=None, top_p=None, presence_penalty=None):
+    """设置本次请求的模型生成参数（线程隔离，优先于 config 全局默认值）"""
+    if temperature is not None:
+        _call_params.temperature = float(temperature)
+    if top_p is not None:
+        _call_params.top_p = float(top_p)
+    if presence_penalty is not None:
+        _call_params.presence_penalty = float(presence_penalty)
+
+
+def get_model_params() -> dict:
+    """返回当前有效的模型生成参数（线程局部覆盖 > config 默认值）"""
+    return {
+        "temperature": getattr(_call_params, "temperature", config.AI_TEMPERATURE),
+        "top_p": getattr(_call_params, "top_p", config.AI_TOP_P),
+        "presence_penalty": getattr(_call_params, "presence_penalty", config.AI_PRESENCE_PENALTY),
+    }
 
 
 def _get_client():
@@ -43,8 +64,12 @@ def _effective_model():
 def _stream_chunks(messages, system=None, max_tokens=800):
     """统一流式接口，yield 文本片段，屏蔽 SDK 差异"""
     client = _get_client()
+    p = get_model_params()
     if config.AI_PROVIDER == "anthropic":
-        kwargs = {"model": _effective_model(), "max_tokens": max_tokens, "messages": messages}
+        kwargs = {
+            "model": _effective_model(), "max_tokens": max_tokens, "messages": messages,
+            "temperature": p["temperature"], "top_p": p["top_p"],
+        }
         if system:
             kwargs["system"] = system
         with client.messages.stream(**kwargs) as stream:
@@ -56,7 +81,8 @@ def _stream_chunks(messages, system=None, max_tokens=800):
             msgs.append({"role": "system", "content": system})
         msgs.extend(messages)
         stream = client.chat.completions.create(
-            model=_effective_model(), messages=msgs, max_tokens=max_tokens, stream=True
+            model=_effective_model(), messages=msgs, max_tokens=max_tokens, stream=True,
+            temperature=p["temperature"], top_p=p["top_p"], presence_penalty=p["presence_penalty"],
         )
         for chunk in stream:
             delta = chunk.choices[0].delta.content
@@ -67,14 +93,17 @@ def _stream_chunks(messages, system=None, max_tokens=800):
 def _call_once(messages, max_tokens=300):
     """非流式单次调用，返回文本"""
     client = _get_client()
+    p = get_model_params()
     if config.AI_PROVIDER == "anthropic":
         resp = client.messages.create(
-            model=_effective_model(), max_tokens=max_tokens, messages=messages
+            model=_effective_model(), max_tokens=max_tokens, messages=messages,
+            temperature=p["temperature"], top_p=p["top_p"],
         )
         return resp.content[0].text.strip()
     else:
         resp = client.chat.completions.create(
-            model=_effective_model(), messages=messages, max_tokens=max_tokens, stream=False
+            model=_effective_model(), messages=messages, max_tokens=max_tokens, stream=False,
+            temperature=p["temperature"], top_p=p["top_p"], presence_penalty=p["presence_penalty"],
         )
         return resp.choices[0].message.content.strip()
 
